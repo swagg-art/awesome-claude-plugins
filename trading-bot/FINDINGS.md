@@ -110,3 +110,59 @@ tractable ask; forty-five years of EURUSD is not.
 EURUSD 2023 has 5,409 H1 bars vs 6,225 for 2025 - 13.1% fewer, and 731 M1
 gaps vs 54-112 in other files. Coverage in that file is thinner. Treat the
 2023 result as slightly weaker evidence than the others.
+
+## Round 4 — GBPUSD 2020-2023, 2025 (fresh pair, zero tuning)
+
+Locked mean-reversion config applied unchanged to a pair never used for
+tuning, across five years.
+
+    year   character      mean-rev    PF    n  |    trend    PF    n
+    2020   reverting        -3.95%  0.93  118  |   +1.86%  1.04   73
+    2021   random           +4.36%  1.08  114  |  -23.53%  0.52   72
+    2022   reverting        -2.89%  0.95  130  |   +1.39%  1.03   68
+    2023   random          +10.04%  1.22   97  |  -18.43%  0.57   57
+    2025   random          -23.07%  0.64  125  |   +7.26%  1.20   56
+
+GBPUSD pooled, mean reversion: 584 trades, -$1,550.63, PF 0.946,
+mean -$2.66/trade, t = -0.672, P(total <= 0) = 74.7%.
+GBPUSD pooled, trend breakout: 326 trades, -$3,143.75, PF 0.858,
+mean -$9.64/trade, t = -1.307, P(total <= 0) = 90.2%.
+
+### Regime hypothesis fails a second time
+2020 and 2022 both measured as MEAN-REVERTING, and mean reversion lost
+money in both (-3.95%, -2.89%). Character does not predict which family
+works. The hypothesis is now rejected on two independent occasions and
+should not be revived without a new mechanism.
+
+## GRAND POOLED OUT-OF-SAMPLE — the answer
+
+Every trade never used for tuning. EURUSD 2023+2025, GBPUSD 2020-2023+2025.
+EURUSD 2024 (the tuning year) excluded.
+
+    trades                810
+    total P&L             -$635.12
+    mean per trade        -$0.78   (sd $97.84)
+    profit factor         0.984
+    win rate              50.4%
+    t-statistic           -0.228   (need 1.96)
+    bootstrap 95% CI      [-$6,085, +$4,792]
+    P(total P&L <= 0)     58.9%
+
+Sample is 3.6x the EURUSD-only pool that showed PF 1.082. The earlier
+positive reading did not survive expansion - it regressed to 0.984, i.e.
+to breakeven-minus-costs. That is exactly what a strategy with no edge
+looks like once the sample is large enough to stop flattering it.
+
+**CONCLUSION: no edge. The mean-reversion result on EURUSD was sample
+noise. It is not worth trading, on demo or otherwise, in its current form.**
+
+## What is now established
+- Neither strategy family shows an edge on EUR/USD or GBP/USD, H1, across
+  7 instrument-years and 810 out-of-sample trades.
+- Market character (variance ratio) does not select the winning family.
+- With 810 trades the smallest confirmable edge is $9.63/trade. Observed:
+  -$0.78. The result is not merely unconfirmed - it is centred on zero.
+
+## Data quality note
+2023 files for BOTH pairs show ~13% fewer bars and 724-731 M1 gaps vs 53-54
+in every other year. This is systematic to HistData's 2023 archives.
