@@ -63,6 +63,7 @@ def run_backtest(
     initial_equity: float = 10_000.0,
     slippage_pips: float = 0.5,
     bars_per_day: float = 24.0,
+    quote_rate: pd.Series | None = None,
 ) -> BacktestResult:
     """Run the loop.
 
@@ -82,6 +83,14 @@ def run_backtest(
     l = bars["low"].to_numpy(float)
     sig = signal.reindex(idx).fillna(0).to_numpy(float)
     atr_v = atr_series.reindex(idx).to_numpy(float)
+
+    # Account-currency value of one unit of the quote currency, per bar.
+    # USD-quoted pairs: 1.0. JPY-quoted (USDJPY): 1/price, since P&L accrues
+    # in yen. Getting this wrong misprices every trade by the FX rate itself.
+    if quote_rate is None:
+        qr = np.ones(len(idx))
+    else:
+        qr = quote_rate.reindex(idx).ffill().to_numpy(float)
 
     equity = initial_equity
     equity_curve = np.full(len(idx), np.nan)
@@ -111,7 +120,8 @@ def run_backtest(
 
             if exit_px is not None:
                 fill = cost_mod.fill_price(exit_px, -pos["side"], inst, slippage_pips)
-                gross = (fill - pos["entry"]) * pos["side"] * pos["lots"] * inst.contract_size
+                gross = ((fill - pos["entry"]) * pos["side"] * pos["lots"]
+                         * inst.contract_size * qr[i])
                 days = pos["bars"] / bars_per_day
                 comm = cost_mod.commission(pos["lots"], inst)
                 fund = cost_mod.funding(pos["lots"], pos["entry"], inst, days)
@@ -120,7 +130,7 @@ def run_backtest(
                 # it here so the report can SHOW it instead of hiding it.
                 per_side = (cost_mod.spread_cost_price(inst)
                             + slippage_pips * inst.pip_size)
-                exec_cost = 2.0 * per_side * pos["lots"] * inst.contract_size
+                exec_cost = 2.0 * per_side * pos["lots"] * inst.contract_size * qr[i]
                 c = comm + fund
                 equity += gross - c
                 trades.append(Trade(
@@ -140,7 +150,7 @@ def run_backtest(
         if pos is None and sig[i] != 0 and np.isfinite(atr_v[i]) and atr_v[i] > 0:
             side = int(np.sign(sig[i]))
             sd = stop_distance(atr_v[i], cfg)
-            lots = position_lots(equity, sd, inst, cfg)
+            lots = position_lots(equity, sd, inst, cfg, usd_per_quote=qr[i])
             if lots > 0:
                 entry = cost_mod.fill_price(o[i + 1], side, inst, slippage_pips)
                 entry_c = cost_mod.commission(lots, inst)

@@ -97,12 +97,24 @@ def load_histdata(path: str | Path, tz_source: str = "Etc/GMT+5") -> pd.DataFram
     frames = []
     for name, raw in files:
         import io
-        df = pd.read_csv(
-            io.BytesIO(raw), sep=";", header=None,
-            names=["ts", "open", "high", "low", "close", "volume"],
-            dtype={"ts": str},
-        )
-        df["ts"] = pd.to_datetime(df["ts"], format="%Y%m%d %H%M%S")
+        head = raw[:200].decode("ascii", "replace").splitlines()[0] if raw else ""
+        if ";" in head:
+            # ASCII format: YYYYMMDD HHMMSS;o;h;l;c;v
+            df = pd.read_csv(
+                io.BytesIO(raw), sep=";", header=None,
+                names=["ts", "open", "high", "low", "close", "volume"],
+                dtype={"ts": str},
+            )
+            df["ts"] = pd.to_datetime(df["ts"], format="%Y%m%d %H%M%S")
+        else:
+            # MT format: YYYY.MM.DD,HH:MM,o,h,l,c,v
+            df = pd.read_csv(
+                io.BytesIO(raw), sep=",", header=None,
+                names=["d", "t", "open", "high", "low", "close", "volume"],
+                dtype={"d": str, "t": str},
+            )
+            df["ts"] = pd.to_datetime(df["d"] + " " + df["t"], format="%Y.%m.%d %H:%M")
+            df = df.drop(columns=["d", "t"])
         frames.append(df)
 
     out = pd.concat(frames, ignore_index=True)

@@ -53,10 +53,17 @@ GBPUSD = Instrument(
     funding_rate_daily=0.0, min_lot=0.01, lot_step=0.01,
 )
 
+# JPY pairs quote in 0.01 pips and settle in yen - see quote_rate in engine.
+USDJPY = Instrument(
+    symbol="USDJPY", kind="fx", pip_size=0.01, contract_size=100_000,
+    quote_ccy="JPY", typical_spread_pips=1.3, commission_per_lot=3.5,
+    funding_rate_daily=0.0, min_lot=0.01, lot_step=0.01,
+)
+
 BTCUSDT = Instrument(
     symbol="BTC/USDT", kind="crypto", pip_size=1.0, contract_size=1.0,
     quote_ccy="USDT", typical_spread_pips=2.0, commission_per_lot=0.0,
     funding_rate_daily=0.0003, min_lot=0.0001, lot_step=0.0001,
 )
 
-REGISTRY = {i.symbol: i for i in (EURUSD, GBPUSD, BTCUSDT)}
+REGISTRY = {i.symbol: i for i in (EURUSD, GBPUSD, USDJPY, BTCUSDT)}
