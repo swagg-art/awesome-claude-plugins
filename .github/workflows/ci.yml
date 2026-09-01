@@ -51,3 +51,23 @@ jobs:
       - name: Run browser e2e tests
         run: npm run test:e2e
         working-directory: ui
+
+  plugins:
+    name: plugins
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Run computer-remote agent tests
+        run: python -m unittest discover -s tests -v
+        working-directory: plugins/computer-remote

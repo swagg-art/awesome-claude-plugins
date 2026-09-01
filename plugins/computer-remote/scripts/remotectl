@@ -1,0 +1,286 @@
+#!/usr/bin/env python3
+"""remotectl - drive a computer-remote agent from the machine Claude runs on.
+
+Talks to remote_agentd.py over HTTP, normally through an SSH tunnel:
+
+    ssh -N -L 8765:127.0.0.1:8765 user@target
+    remotectl health
+    remotectl screenshot -o /tmp/screen.png
+    remotectl click 640 400
+    remotectl type "hello"
+    remotectl key ctrl+s
+
+Hosts can be named in ~/.config/computer-remote/hosts.json so you do not have
+to repeat the URL and token:
+
+    {"laptop": {"url": "http://127.0.0.1:8765", "token": "..."}}
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import sys
+import time
+import urllib.error
+import urllib.request
+
+DEFAULT_URL = "http://127.0.0.1:8765"
+HOSTS_FILE = os.path.expanduser(
+    os.environ.get("COMPUTER_REMOTE_HOSTS", "~/.config/computer-remote/hosts.json")
+)
+TOKEN_FILE = os.path.expanduser("~/.config/computer-remote/token")
+
+
+class ClientError(Exception):
+    pass
+
+
+def load_hosts() -> dict:
+    if not os.path.exists(HOSTS_FILE):
+        return {}
+    try:
+        with open(HOSTS_FILE, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ClientError(f"could not read {HOSTS_FILE}: {exc}") from exc
+    return data if isinstance(data, dict) else {}
+
+
+def resolve_target(args: argparse.Namespace) -> tuple[str, str]:
+    url, token = args.url, args.token
+    if args.host:
+        hosts = load_hosts()
+        if args.host not in hosts:
+            known = ", ".join(sorted(hosts)) or "none configured"
+            raise ClientError(f"unknown host {args.host!r} (known: {known})")
+        entry = hosts[args.host]
+        url = url or entry.get("url")
+        token = token or entry.get("token")
+    url = url or os.environ.get("COMPUTER_REMOTE_URL") or DEFAULT_URL
+    token = token or os.environ.get("COMPUTER_REMOTE_TOKEN")
+    if not token and os.path.exists(TOKEN_FILE):
+        token = open(TOKEN_FILE, encoding="utf-8").read().strip()
+    if not token:
+        raise ClientError(
+            "no token. Pass --token, set COMPUTER_REMOTE_TOKEN, "
+            f"or add the host to {HOSTS_FILE}"
+        )
+    return url.rstrip("/"), token
+
+
+def request(url: str, token: str, path: str, payload: dict | None, method: str = "POST", timeout: int = 45):
+    data = None if payload is None else json.dumps(payload).encode()
+    req = urllib.request.Request(url + path, data=data, method=method)
+    req.add_header("Authorization", f"Bearer {token}")
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            body = response.read()
+            ctype = response.headers.get("Content-Type", "")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")
+        try:
+            detail = json.loads(detail).get("error", detail)
+        except json.JSONDecodeError:
+            pass
+        raise ClientError(f"agent returned {exc.code}: {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise ClientError(
+            f"cannot reach agent at {url}: {exc.reason}. "
+            "Is the SSH tunnel up and the daemon running?"
+        ) from exc
+    if ctype.startswith("image/"):
+        return body
+    return json.loads(body or b"{}")
+
+
+def send_actions(url: str, token: str, actions: list[dict]) -> dict:
+    return request(url, token, "/input", {"actions": actions})
+
+
+def parse_region(value: str | None) -> list[int] | None:
+    if not value:
+        return None
+    parts = [p for p in re.split(r"[,\s]+", value.strip()) if p]
+    if len(parts) != 4:
+        raise ClientError("--region takes x,y,width,height")
+    try:
+        return [int(p) for p in parts]
+    except ValueError as exc:
+        raise ClientError("--region values must be integers") from exc
+
+
+def cmd_health(args, url, token):
+    print(json.dumps(request(url, token, "/health", None, method="GET"), indent=2))
+
+
+def cmd_screenshot(args, url, token):
+    payload: dict = {}
+    region = parse_region(args.region)
+    if region:
+        payload["region"] = region
+    if args.scale:
+        payload["scale"] = args.scale
+    image = request(url, token, "/screenshot", payload)
+    path = args.output or os.path.join(
+        os.environ.get("TMPDIR", "/tmp"), f"remote-screen-{int(time.time())}.png"
+    )
+    directory = os.path.dirname(os.path.abspath(path))
+    os.makedirs(directory, exist_ok=True)
+    with open(path, "wb") as handle:
+        handle.write(image)
+    print(path)
+
+
+def cmd_move(args, url, token):
+    send_actions(url, token, [{"type": "move", "x": args.x, "y": args.y}])
+
+
+def cmd_click(args, url, token):
+    action: dict = {"type": "click", "button": args.button, "count": args.count}
+    if args.x is not None and args.y is not None:
+        action["x"], action["y"] = args.x, args.y
+    send_actions(url, token, [action])
+
+
+def cmd_drag(args, url, token):
+    send_actions(
+        url,
+        token,
+        [
+            {
+                "type": "drag",
+                "x": args.x1,
+                "y": args.y1,
+                "to_x": args.x2,
+                "to_y": args.y2,
+                "button": args.button,
+            }
+        ],
+    )
+
+
+def cmd_scroll(args, url, token):
+    send_actions(url, token, [{"type": "scroll", "dx": args.dx, "dy": args.dy}])
+
+
+def cmd_type(args, url, token):
+    send_actions(url, token, [{"type": "text", "text": " ".join(args.text)}])
+
+
+def cmd_key(args, url, token):
+    send_actions(url, token, [{"type": "key", "keys": args.keys}])
+
+
+def cmd_clipboard(args, url, token):
+    if args.action == "get":
+        print(request(url, token, "/clipboard", None, method="GET")["text"])
+    else:
+        text = " ".join(args.text) if args.text else sys.stdin.read()
+        request(url, token, "/clipboard", {"text": text})
+
+
+def cmd_do(args, url, token):
+    source = sys.stdin.read() if args.file == "-" else open(args.file, encoding="utf-8").read()
+    try:
+        actions = json.loads(source)
+    except json.JSONDecodeError as exc:
+        raise ClientError(f"invalid action JSON: {exc}") from exc
+    if isinstance(actions, dict):
+        actions = actions.get("actions", [actions])
+    if not isinstance(actions, list):
+        raise ClientError("expected a JSON array of actions")
+    print(json.dumps(send_actions(url, token, actions)))
+
+
+def cmd_tunnel(args, url, token):
+    port = url.rsplit(":", 1)[-1]
+    port = port if port.isdigit() else "8765"
+    print(f"ssh -N -L {port}:127.0.0.1:{port} {args.destination}")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="remotectl", description=__doc__.split("\n", 1)[0])
+    parser.add_argument("--host", help="named host from hosts.json")
+    parser.add_argument("--url", help=f"agent URL (default {DEFAULT_URL})")
+    parser.add_argument("--token", help="bearer token")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("health", help="report backend, screen size and missing tools").set_defaults(func=cmd_health)
+
+    shot = sub.add_parser("screenshot", help="capture the remote screen to a PNG file")
+    shot.add_argument("-o", "--output", help="where to write the PNG")
+    shot.add_argument("--region", help="x,y,width,height")
+    shot.add_argument("--scale", type=int, help="downscale to this max width in pixels")
+    shot.set_defaults(func=cmd_screenshot)
+
+    move = sub.add_parser("move", help="move the pointer")
+    move.add_argument("x", type=int)
+    move.add_argument("y", type=int)
+    move.set_defaults(func=cmd_move)
+
+    click = sub.add_parser("click", help="click, optionally at a position")
+    click.add_argument("x", type=int, nargs="?")
+    click.add_argument("y", type=int, nargs="?")
+    click.add_argument("--button", default="left", choices=["left", "right", "middle"])
+    click.add_argument("--count", type=int, default=1, help="2 for a double click")
+    click.set_defaults(func=cmd_click)
+
+    drag = sub.add_parser("drag", help="press at one point, release at another")
+    for name in ("x1", "y1", "x2", "y2"):
+        drag.add_argument(name, type=int)
+    drag.add_argument("--button", default="left", choices=["left", "right", "middle"])
+    drag.set_defaults(func=cmd_drag)
+
+    scroll = sub.add_parser("scroll", help="scroll by wheel steps (dy>0 scrolls up)")
+    scroll.add_argument("dx", type=int, nargs="?", default=0)
+    scroll.add_argument("dy", type=int, nargs="?", default=0)
+    scroll.set_defaults(func=cmd_scroll)
+
+    typer = sub.add_parser("type", help="type literal text")
+    typer.add_argument("text", nargs="+")
+    typer.set_defaults(func=cmd_type)
+
+    key = sub.add_parser("key", help="press key combos, e.g. ctrl+s alt+tab enter")
+    key.add_argument("keys", nargs="+")
+    key.set_defaults(func=cmd_key)
+
+    clip = sub.add_parser("clipboard", help="read or write the remote clipboard")
+    clip.add_argument("action", choices=["get", "set"])
+    clip.add_argument("text", nargs="*")
+    clip.set_defaults(func=cmd_clipboard)
+
+    batch = sub.add_parser("do", help="run a JSON array of actions from a file or stdin")
+    batch.add_argument("file", help="path to JSON, or - for stdin")
+    batch.set_defaults(func=cmd_do)
+
+    tunnel = sub.add_parser("tunnel", help="print the SSH command that forwards the agent port")
+    tunnel.add_argument("destination", help="user@host as ssh expects it")
+    tunnel.set_defaults(func=cmd_tunnel)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        if args.command == "tunnel":
+            url = args.url or os.environ.get("COMPUTER_REMOTE_URL") or DEFAULT_URL
+            args.func(args, url, "")
+            return 0
+        url, token = resolve_target(args)
+        args.func(args, url, token)
+    except ClientError as exc:
+        print(f"remotectl: {exc}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

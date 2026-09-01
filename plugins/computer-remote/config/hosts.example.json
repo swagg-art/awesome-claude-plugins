@@ -1,0 +1,14 @@
+{
+  "laptop": {
+    "url": "http://127.0.0.1:8765",
+    "token": "paste-the-token-from-the-target-machine",
+    "ssh": "me@laptop.local",
+    "notes": "macOS, needs cliclick; grant Accessibility + Screen Recording to the terminal running the agent"
+  },
+  "lab-box": {
+    "url": "http://127.0.0.1:8766",
+    "token": "a-different-token",
+    "ssh": "ops@10.0.0.12",
+    "notes": "Ubuntu 24.04, X11, xdotool + imagemagick installed"
+  }
+}

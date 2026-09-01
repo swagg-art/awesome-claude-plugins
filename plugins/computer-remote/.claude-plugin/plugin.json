@@ -1,0 +1,19 @@
+{
+  "name": "computer-remote",
+  "version": "1.0.0",
+  "description": "Control a remote desktop from Claude Code: screenshots, mouse and keyboard input, and clipboard access over an SSH-tunnelled agent.",
+  "author": {
+    "name": "awesome-claude-plugins"
+  },
+  "homepage": "https://github.com/swagg-art/awesome-claude-plugins/tree/main/plugins/computer-remote",
+  "repository": "https://github.com/swagg-art/awesome-claude-plugins",
+  "license": "MIT",
+  "keywords": [
+    "remote-control",
+    "desktop",
+    "screenshot",
+    "automation",
+    "gui",
+    "ssh"
+  ]
+}
