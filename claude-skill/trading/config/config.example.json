@@ -1,0 +1,15 @@
+{
+  "_comment": "Copy to ~/.config/mt5-trading/config.json and chmod 600. Credentials are optional - mt5ctl attaches to whatever account the terminal is already logged into. Prefer MT5_LOGIN / MT5_PASSWORD / MT5_SERVER environment variables over storing a password here.",
+
+  "login": null,
+  "password": null,
+  "server": null,
+  "terminal_path": null,
+
+  "max_volume": 0.5,
+  "max_open_positions": 20,
+  "allowed_symbols": ["EURUSD", "GBPUSD", "XAUUSD"],
+  "default_deviation": 20,
+  "magic": 777001,
+  "dry_run": false
+}

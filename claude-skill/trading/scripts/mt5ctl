@@ -1,0 +1,591 @@
+#!/usr/bin/env python3
+"""mt5ctl - MetaTrader 5 from the command line, in terminal-style tables.
+
+  mt5ctl account
+  mt5ctl positions
+  mt5ctl buy EURUSD 0.10 --sl 1.0820 --tp 1.0900
+  mt5ctl close 123456789
+  mt5ctl size EURUSD --risk 1 --entry 1.0850 --stop 1.0820
+  mt5ctl journal stats
+  mt5ctl backtest EURUSD --tf H1 --strategy ma_cross --bars 2000
+
+Orders are sent when you ask for them. Validation happens first; there is no
+second "are you sure?" prompt. Use --dry-run to see the request instead.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import backtest as bt  # noqa: E402
+import journal as jr  # noqa: E402
+import risk as rk  # noqa: E402
+import tables  # noqa: E402
+from mt5_client import MT5, ORDER_TYPE_NAMES, Config, MT5Error  # noqa: E402
+
+OUT_JSON = False
+
+
+def emit(text: str, payload=None) -> None:
+    if OUT_JSON:
+        print(json.dumps(payload if payload is not None else {"text": text}, default=str, indent=2))
+    else:
+        print(text)
+
+
+def session(args) -> MT5:
+    config = Config.load(args.config)
+    if args.dry_run:
+        config.dry_run = True
+    return MT5(config).connect()
+
+
+def digits_fmt(value, digits: int = 5) -> str:
+    return "-" if value in (None, 0) else f"{float(value):.{digits}f}"
+
+
+# --- read-only views --------------------------------------------------------
+
+
+def cmd_account(args):
+    with session(args) as mt:
+        info = mt.account()
+    currency = info.get("currency", "")
+    rows = [
+        ("Login", info.get("login")),
+        ("Server", info.get("server")),
+        ("Mode", "DEMO" if info.get("is_demo") else "LIVE"),
+        ("Balance", tables.money(info.get("balance", 0), currency)),
+        ("Equity", tables.money(info.get("equity", 0), currency)),
+        ("Floating P&L", tables.money(info.get("profit", 0), currency)),
+        ("Margin used", tables.money(info.get("margin", 0), currency)),
+        ("Free margin", tables.money(info.get("margin_free", 0), currency)),
+        ("Margin level", f"{info.get('margin_level', 0):.2f}%"),
+        ("Leverage", f"1:{info.get('leverage', 0)}"),
+    ]
+    emit(tables.kv(rows, "ACCOUNT"), info)
+
+
+def cmd_positions(args):
+    with session(args) as mt:
+        positions = mt.positions(args.symbol)
+        digits = {}
+        for pos in positions:
+            if pos["symbol"] not in digits:
+                digits[pos["symbol"]] = mt.symbol(pos["symbol"]).digits
+    rows = [
+        [
+            p["ticket"],
+            p["symbol"],
+            ORDER_TYPE_NAMES.get(p["type"], p["type"]),
+            f"{p['volume']:.2f}",
+            digits_fmt(p["price_open"], digits.get(p["symbol"], 5)),
+            digits_fmt(p["price_current"], digits.get(p["symbol"], 5)),
+            digits_fmt(p.get("sl"), digits.get(p["symbol"], 5)),
+            digits_fmt(p.get("tp"), digits.get(p["symbol"], 5)),
+            tables.signed(p.get("profit", 0)),
+        ]
+        for p in positions
+    ]
+    total = sum(p.get("profit", 0) for p in positions)
+    text = tables.render(
+        ["Ticket", "Symbol", "Type", "Lots", "Entry", "Current", "SL", "TP", "P&L"],
+        rows,
+        f"OPEN POSITIONS ({len(positions)})",
+    )
+    if positions:
+        text += f"\nFloating P&L: {tables.signed(total)}"
+    emit(text, positions)
+
+
+def cmd_orders(args):
+    with session(args) as mt:
+        orders = mt.orders()
+    rows = [
+        [
+            o["ticket"],
+            o["symbol"],
+            ORDER_TYPE_NAMES.get(o["type"], o["type"]),
+            f"{o.get('volume_current', 0):.2f}",
+            digits_fmt(o.get("price_open")),
+            digits_fmt(o.get("sl")),
+            digits_fmt(o.get("tp")),
+        ]
+        for o in orders
+    ]
+    emit(
+        tables.render(
+            ["Ticket", "Symbol", "Type", "Lots", "Price", "SL", "TP"],
+            rows,
+            f"PENDING ORDERS ({len(orders)})",
+        ),
+        orders,
+    )
+
+
+def cmd_quote(args):
+    rows, payload = [], []
+    with session(args) as mt:
+        for name in args.symbols:
+            info = mt.symbol(name)
+            tick = mt.tick(info.name)
+            spread = (tick.ask - tick.bid) / (info.point or 1)
+            rows.append(
+                [
+                    info.name,
+                    f"{tick.bid:.{info.digits}f}",
+                    f"{tick.ask:.{info.digits}f}",
+                    f"{spread:.1f}",
+                    f"{info.volume_min:.2f}-{info.volume_max:g}",
+                    f"{info.volume_step:.2f}",
+                ]
+            )
+            payload.append({"symbol": info.name, "bid": tick.bid, "ask": tick.ask, "spread_points": spread})
+    emit(tables.render(["Symbol", "Bid", "Ask", "Spread", "Lots", "Step"], rows, "QUOTES"), payload)
+
+
+def cmd_symbols(args):
+    with session(args) as mt:
+        found = [s.name for s in (mt.mt5.symbols_get() or [])]
+    if args.pattern:
+        needle = args.pattern.upper()
+        found = [s for s in found if needle in s.upper()]
+    found.sort()
+    shown = found[: args.limit]
+    text = tables.render(["Symbol"], [[s] for s in shown], f"SYMBOLS ({len(found)} matched)")
+    if len(found) > len(shown):
+        text += f"\n… {len(found) - len(shown)} more; narrow with a pattern"
+    emit(text, found)
+
+
+def cmd_bars(args):
+    with session(args) as mt:
+        info = mt.symbol(args.symbol)
+        rates = mt.bars(info.name, args.tf, args.count)
+    bars = bt.bars_from_rates(rates)[-args.show :]
+    from datetime import datetime
+
+    rows = [
+        [
+            datetime.utcfromtimestamp(b["time"]).strftime("%Y-%m-%d %H:%M"),
+            f"{b['open']:.{info.digits}f}",
+            f"{b['high']:.{info.digits}f}",
+            f"{b['low']:.{info.digits}f}",
+            f"{b['close']:.{info.digits}f}",
+            f"{b['volume']:.0f}",
+        ]
+        for b in bars
+    ]
+    emit(
+        tables.render(
+            ["Time (UTC)", "Open", "High", "Low", "Close", "Volume"],
+            rows,
+            f"{info.name} {args.tf.upper()}",
+        ),
+        bars,
+    )
+
+
+# --- execution --------------------------------------------------------------
+
+
+def num(value):
+    """Render a float at full precision - prices must not round to 2dp."""
+    return f"{value:.10g}" if isinstance(value, float) else value
+
+
+def report_order(result: dict, label: str) -> None:
+    if result.get("dry_run"):
+        rows = [(k, num(v)) for k, v in result["request"].items()]
+        emit(tables.kv(rows, f"DRY RUN - {label} (nothing sent)"), result)
+        return
+    rows = [
+        ("Result", "done"),
+        ("Order", result.get("order")),
+        ("Deal", result.get("deal")),
+        ("Volume", num(result.get("volume"))),
+        ("Price", num(result.get("price"))),
+        ("Comment", result.get("comment") or "-"),
+    ]
+    emit(tables.kv(rows, label), result)
+
+
+def cmd_buy(args):
+    _market(args, "buy")
+
+
+def cmd_sell(args):
+    _market(args, "sell")
+
+
+def _market(args, side: str):
+    with session(args) as mt:
+        result = mt.market_order(
+            args.symbol,
+            side,
+            args.volume,
+            sl=args.sl,
+            tp=args.tp,
+            deviation=args.deviation,
+            comment=args.comment,
+        )
+    report_order(result, f"{side.upper()} {args.volume:.2f} {args.symbol.upper()}")
+
+
+def cmd_pending(args):
+    with session(args) as mt:
+        result = mt.pending_order(
+            args.symbol, args.side, args.kind, args.volume, args.price, sl=args.sl, tp=args.tp,
+            comment=args.comment,
+        )
+    report_order(result, f"{args.side.upper()} {args.kind.upper()} {args.volume:.2f} {args.symbol.upper()}")
+
+
+def cmd_modify(args):
+    if args.sl is None and args.tp is None:
+        raise MT5Error("nothing to modify - pass --sl and/or --tp")
+    with session(args) as mt:
+        result = mt.set_sltp(args.ticket, sl=args.sl, tp=args.tp)
+    report_order(result, f"MODIFY {args.ticket}")
+
+
+def cmd_close(args):
+    with session(args) as mt:
+        result = mt.close_position(args.ticket, args.volume)
+    report_order(result, f"CLOSE {args.ticket}")
+
+
+def cmd_close_all(args):
+    with session(args) as mt:
+        results = mt.close_all(args.symbol)
+    rows = [[r.get("order"), r.get("volume"), r.get("price"), "done"] for r in results]
+    emit(
+        tables.render(["Order", "Volume", "Price", "Result"], rows, f"CLOSED {len(results)}"),
+        results,
+    )
+
+
+def cmd_cancel(args):
+    with session(args) as mt:
+        result = mt.cancel_order(args.ticket)
+    report_order(result, f"CANCEL {args.ticket}")
+
+
+# --- risk -------------------------------------------------------------------
+
+
+def cmd_size(args):
+    with session(args) as mt:
+        info = mt.symbol(args.symbol)
+        account = mt.account()
+        balance = args.balance if args.balance else account["balance"]
+        sizing = rk.size_position(
+            balance=balance,
+            risk_pct=args.risk,
+            entry=args.entry,
+            stop=args.stop,
+            tick_value=info.trade_tick_value,
+            tick_size=info.trade_tick_size,
+            volume_step=info.volume_step,
+            volume_min=info.volume_min,
+            volume_max=info.volume_max,
+            max_volume=mt.config.max_volume,
+        )
+        currency = account.get("currency", "")
+    rows = [("Symbol", info.name), ("Balance", tables.money(balance, currency))] + sizing.as_rows(
+        currency
+    )
+    emit(tables.kv(rows, "POSITION SIZE"), sizing.__dict__)
+
+
+def cmd_heat(args):
+    with session(args) as mt:
+        positions = mt.positions()
+        account = mt.account()
+        per_lot = {}
+        for pos in positions:
+            if pos["symbol"] not in per_lot:
+                info = mt.symbol(pos["symbol"])
+                per_lot[pos["symbol"]] = rk.value_per_lot(
+                    info.trade_tick_value, info.trade_tick_size
+                )
+        heat = rk.portfolio_heat(positions, account["equity"], lambda s: per_lot[s])
+    currency = account.get("currency", "")
+    rows = [
+        ("Open positions", heat["open_positions"]),
+        ("Equity", tables.money(account["equity"], currency)),
+        ("Risk if all stops hit", tables.money(heat["risk_amount"], currency)),
+        ("Portfolio heat", f"{heat['heat_pct']:.2f}%"),
+        ("Positions without a stop", heat["without_stop"]),
+    ]
+    if heat["without_stop_symbols"]:
+        rows.append(("Unprotected", ", ".join(heat["without_stop_symbols"])))
+    emit(tables.kv(rows, "PORTFOLIO RISK"), heat)
+
+
+# --- journal ----------------------------------------------------------------
+
+
+def cmd_journal(args):
+    if args.action == "sync":
+        with session(args) as mt:
+            deals = mt.deals(args.days)
+        incoming = jr.trades_from_deals(deals)
+        merged = jr.merge(jr.load(args.file), incoming)
+        path = jr.save(merged, args.file)
+        emit(f"Synced {len(incoming)} closed trades from {args.days}d of history → {path}",
+             {"synced": len(incoming), "total": len(merged), "path": path})
+        return
+
+    trades = jr.load(args.file)
+
+    if args.action == "list":
+        rows = [
+            [
+                t["position_id"],
+                t["closed_at"][:16].replace("T", " "),
+                t["symbol"],
+                t["side"],
+                f"{t['volume']:.2f}",
+                tables.signed(t["net"]),
+                t.get("note", "")[:28],
+            ]
+            for t in trades[-args.limit :]
+        ]
+        emit(
+            tables.render(
+                ["ID", "Closed (UTC)", "Symbol", "Side", "Lots", "Net", "Note"],
+                rows,
+                f"JOURNAL ({len(trades)} trades)",
+            ),
+            trades[-args.limit :],
+        )
+        return
+
+    if args.action == "note":
+        if args.id is None:
+            raise MT5Error("journal note needs --id <position_id>")
+        updated = jr.annotate(trades, args.id, note=args.text, setup=args.setup, tags=args.tags)
+        jr.save(updated, args.file)
+        emit(f"Annotated trade {args.id}", {"position_id": args.id})
+        return
+
+    stats = jr.stats(trades)
+    if not stats.get("trades"):
+        emit("No closed trades journalled yet. Run: mt5ctl journal sync", stats)
+        return
+    rows = [
+        ("Trades", stats["trades"]),
+        ("Win rate", f"{stats['win_rate'] * 100:.1f}%  ({stats['wins']}W / {stats['losses']}L)"),
+        ("Net P&L", tables.signed(stats["net"])),
+        ("Expectancy / trade", tables.signed(stats["expectancy"])),
+        ("Profit factor", f"{stats['profit_factor']:.2f}"),
+        ("Average win", f"{stats['avg_win']:,.2f}"),
+        ("Average loss", f"{stats['avg_loss']:,.2f}"),
+        ("Payoff ratio", f"{stats['payoff']:.2f}"),
+        ("Largest win", tables.signed(stats["largest_win"])),
+        ("Largest loss", tables.signed(stats["largest_loss"])),
+        ("Max drawdown", f"{stats['max_drawdown']:,.2f}"),
+        ("Costs (comm + swap)", tables.signed(stats["commission"] + stats["swap"])),
+    ]
+    if stats.get("avg_r") is not None:
+        rows.insert(4, ("Average R", f"{stats['avg_r']:+.2f}R"))
+    text = tables.kv(rows, "JOURNAL STATS")
+
+    if args.by_symbol:
+        per = jr.by_symbol(trades)
+        sym_rows = [
+            [
+                symbol,
+                s["trades"],
+                f"{s['win_rate'] * 100:.0f}%",
+                tables.signed(s["net"]),
+                f"{s['profit_factor']:.2f}" if s["profit_factor"] != float("inf") else "∞",
+            ]
+            for symbol, s in per.items()
+        ]
+        text += "\n\n" + tables.render(
+            ["Symbol", "Trades", "Win%", "Net", "PF"], sym_rows, "BY SYMBOL"
+        )
+    emit(text, stats)
+
+
+# --- backtest ---------------------------------------------------------------
+
+
+def cmd_backtest(args):
+    factory = bt.STRATEGIES.get(args.strategy)
+    if factory is None:
+        raise MT5Error(f"unknown strategy {args.strategy!r}; try {', '.join(bt.STRATEGIES)}")
+    params = {}
+    for pair in args.param or []:
+        key, _, value = pair.partition("=")
+        if not _:
+            raise MT5Error(f"--param expects key=value, got {pair!r}")
+        params[key] = float(value) if "." in value else int(value)
+    strategy = factory(**params)
+
+    with session(args) as mt:
+        info = mt.symbol(args.symbol)
+        rates = mt.bars(info.name, args.tf, args.bars)
+    bars = bt.bars_from_rates(rates)
+    result = bt.run(
+        bars,
+        strategy,
+        spread=args.spread * (info.point or 0.00001),
+        stop_points=args.stop * (info.point or 0.00001) if args.stop else None,
+        target_points=args.target * (info.point or 0.00001) if args.target else None,
+        allow_short=not args.long_only,
+    )
+    s = result.stats()
+    if not s.get("trades"):
+        emit(f"{strategy.name} produced no trades over {len(bars)} bars", s)
+        return
+    point = info.point or 0.00001
+    rows = [
+        ("Strategy", strategy.name),
+        ("Symbol / TF", f"{info.name} {args.tf.upper()}"),
+        ("Bars", f"{s['bars']:,}"),
+        ("Trades", f"{s['trades']}  ({s['longs']} long / {s['shorts']} short)"),
+        ("Win rate", f"{s['win_rate'] * 100:.1f}%"),
+        ("Net", f"{s['net_points'] / point:,.0f} points"),
+        ("Expectancy", f"{s['expectancy_points'] / point:,.1f} points/trade"),
+        ("Profit factor", f"{s['profit_factor']:.2f}"),
+        ("Avg win / loss", f"{s['avg_win'] / point:,.0f} / {s['avg_loss'] / point:,.0f} points"),
+        ("Max drawdown", f"{s['max_drawdown_points'] / point:,.0f} points"),
+    ]
+    emit(tables.kv(rows, "BACKTEST"), s)
+
+
+# --- parser -----------------------------------------------------------------
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="mt5ctl", description=__doc__.split("\n")[0])
+    p.add_argument("--config", help="path to config.json")
+    p.add_argument("--dry-run", action="store_true", help="validate and print the request, send nothing")
+    p.add_argument("--json", action="store_true", help="machine-readable output")
+    sub = p.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("account", help="balance, equity, margin, demo/live").set_defaults(func=cmd_account)
+
+    pos = sub.add_parser("positions", help="open positions with floating P&L")
+    pos.add_argument("symbol", nargs="?")
+    pos.set_defaults(func=cmd_positions)
+
+    sub.add_parser("orders", help="working pending orders").set_defaults(func=cmd_orders)
+
+    q = sub.add_parser("quote", help="bid/ask/spread and lot constraints")
+    q.add_argument("symbols", nargs="+")
+    q.set_defaults(func=cmd_quote)
+
+    sy = sub.add_parser("symbols", help="list tradable symbols")
+    sy.add_argument("pattern", nargs="?")
+    sy.add_argument("--limit", type=int, default=40)
+    sy.set_defaults(func=cmd_symbols)
+
+    ba = sub.add_parser("bars", help="recent OHLC bars")
+    ba.add_argument("symbol")
+    ba.add_argument("--tf", default="H1")
+    ba.add_argument("--count", type=int, default=100)
+    ba.add_argument("--show", type=int, default=20)
+    ba.set_defaults(func=cmd_bars)
+
+    for name, func in (("buy", cmd_buy), ("sell", cmd_sell)):
+        m = sub.add_parser(name, help=f"{name} at market, sent immediately")
+        m.add_argument("symbol")
+        m.add_argument("volume", type=float)
+        m.add_argument("--sl", type=float)
+        m.add_argument("--tp", type=float)
+        m.add_argument("--deviation", type=int)
+        m.add_argument("--comment", default="")
+        m.set_defaults(func=func)
+
+    pend = sub.add_parser("pending", help="place a limit or stop order")
+    pend.add_argument("symbol")
+    pend.add_argument("side", choices=["buy", "sell"])
+    pend.add_argument("kind", choices=["limit", "stop"])
+    pend.add_argument("volume", type=float)
+    pend.add_argument("price", type=float)
+    pend.add_argument("--sl", type=float)
+    pend.add_argument("--tp", type=float)
+    pend.add_argument("--comment", default="")
+    pend.set_defaults(func=cmd_pending)
+
+    mod = sub.add_parser("modify", help="set or move SL/TP on an open position")
+    mod.add_argument("ticket", type=int)
+    mod.add_argument("--sl", type=float)
+    mod.add_argument("--tp", type=float)
+    mod.set_defaults(func=cmd_modify)
+
+    cl = sub.add_parser("close", help="close a position, fully or partially")
+    cl.add_argument("ticket", type=int)
+    cl.add_argument("--volume", type=float, help="partial close size in lots")
+    cl.set_defaults(func=cmd_close)
+
+    ca = sub.add_parser("close-all", help="close every open position")
+    ca.add_argument("--symbol")
+    ca.set_defaults(func=cmd_close_all)
+
+    cx = sub.add_parser("cancel", help="delete a pending order")
+    cx.add_argument("ticket", type=int)
+    cx.set_defaults(func=cmd_cancel)
+
+    sz = sub.add_parser("size", help="lots for a given risk %% and stop")
+    sz.add_argument("symbol")
+    sz.add_argument("--risk", type=float, required=True, help="percent of balance")
+    sz.add_argument("--entry", type=float, required=True)
+    sz.add_argument("--stop", type=float, required=True)
+    sz.add_argument("--balance", type=float, help="override account balance")
+    sz.set_defaults(func=cmd_size)
+
+    sub.add_parser("heat", help="open risk across all positions").set_defaults(func=cmd_heat)
+
+    j = sub.add_parser("journal", help="sync, list, annotate and analyse closed trades")
+    j.add_argument("action", choices=["sync", "stats", "list", "note"], nargs="?", default="stats")
+    j.add_argument("--days", type=int, default=90)
+    j.add_argument("--limit", type=int, default=25)
+    j.add_argument("--file")
+    j.add_argument("--id", type=int)
+    j.add_argument("--text")
+    j.add_argument("--setup")
+    j.add_argument("--tags", nargs="*")
+    j.add_argument("--by-symbol", action="store_true")
+    j.set_defaults(func=cmd_journal)
+
+    b = sub.add_parser("backtest", help="test a rule on historical bars")
+    b.add_argument("symbol")
+    b.add_argument("--tf", default="H1")
+    b.add_argument("--bars", type=int, default=2000)
+    b.add_argument("--strategy", default="ma_cross", choices=sorted(bt.STRATEGIES))
+    b.add_argument("--param", action="append", help="key=value, repeatable")
+    b.add_argument("--spread", type=float, default=0.0, help="assumed spread in points")
+    b.add_argument("--stop", type=float, help="stop in points")
+    b.add_argument("--target", type=float, help="target in points")
+    b.add_argument("--long-only", action="store_true")
+    b.set_defaults(func=cmd_backtest)
+
+    return p
+
+
+def main(argv=None) -> int:
+    global OUT_JSON
+    args = build_parser().parse_args(argv)
+    OUT_JSON = args.json
+    try:
+        args.func(args)
+    except (MT5Error, rk.RiskError, jr.JournalError, bt.BacktestError) as exc:
+        print(f"mt5ctl: {exc}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
