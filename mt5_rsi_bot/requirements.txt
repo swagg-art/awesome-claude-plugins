@@ -1,0 +1,13 @@
+# The bot runs on the native_mt5 package in this repository: it reuses that
+# project's broker adapters, safety guards and position sizing rather than
+# reimplementing them. Installed as an editable path dependency so a change to
+# either side is picked up without a reinstall.
+#
+# If you ever lift mt5_rsi_bot out of this repo, replace this line with a
+# published requirement or vendor the package.
+-e ../native-mt5
+
+# The real MetaTrader 5 terminal bridge. Windows wheels only — on macOS or
+# Linux this line is skipped and the bot can still run against the mock
+# adapter (NATIVE_MT5_ADAPTER=mock) for development.
+MetaTrader5>=5.0.45; sys_platform == 'win32'
