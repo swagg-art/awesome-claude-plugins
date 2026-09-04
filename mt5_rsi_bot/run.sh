@@ -1,89 +1,81 @@
 #!/usr/bin/env bash
 #
-# Local runner: creates the virtual environment if it is missing, installs
-# dependencies when they have changed, loads .env, and starts the bot in the
-# foreground. Safe to run repeatedly.
+# Local runner. Creates the virtual environment, installs dependencies when
+# requirements.txt has changed, and launches the bot.
 #
-#   ./run.sh              start the bot
-#   ./run.sh --setup      build the environment and stop
-#   ./run.sh --dry-run    force MT5_RSI_DRY_RUN=true for this run only
+#   ./run.sh             start the bot
+#   ./run.sh --setup     build the environment and stop
+#   ./run.sh --dry-run   force DRY_RUN=true for this run only
 #
 set -euo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$HERE"
+# systemd and cron do not run this from its own directory.
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$DIR"
 
-VENV="$HERE/.venv"
-STAMP="$VENV/.requirements-stamp"
+STAMP="venv/.requirements-stamp"
 
-setup_only=false
-for arg in "$@"; do
-  case "$arg" in
-    --setup)   setup_only=true ;;
-    --dry-run) export MT5_RSI_DRY_RUN=true ;;
-    -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "unknown option: $arg" >&2; exit 2 ;;
-  esac
+for arg in "${@:-}"; do
+    case "$arg" in
+        --setup)   SETUP_ONLY=1 ;;
+        --dry-run) export DRY_RUN=true ;;
+        "")        ;;
+        -h|--help) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "unknown option: $arg" >&2; exit 2 ;;
+    esac
 done
 
-# --- python ----------------------------------------------------------------
-PYTHON="${PYTHON:-python3}"
-if ! command -v "$PYTHON" >/dev/null 2>&1; then
-  echo "error: $PYTHON not found. Install Python 3.11 or newer." >&2
-  exit 1
+if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+    echo "error: Python 3.10 or newer is required." >&2
+    exit 1
 fi
 
-version="$("$PYTHON" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
-if ! "$PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'; then
-  echo "error: Python 3.11+ required, found $version." >&2
-  exit 1
+if [ ! -d "venv" ]; then
+    echo "Initializing Virtual Environment..."
+    python3 -m venv venv
+    ./venv/bin/pip install --upgrade pip
 fi
 
-# --- virtual environment ---------------------------------------------------
-if [[ ! -d "$VENV" ]]; then
-  echo "creating virtual environment in .venv (Python $version)"
-  "$PYTHON" -m venv "$VENV"
+# The original only installed when the venv was absent, so an edit to
+# requirements.txt was never picked up. Compare against a stamp instead.
+if [ ! -f "$STAMP" ] || ! cmp -s requirements.txt "$STAMP"; then
+    echo "Installing dependencies..."
+    ./venv/bin/pip install -r requirements.txt
+    cp requirements.txt "$STAMP"
 fi
 
-# Reinstall only when requirements.txt has changed since the last successful
-# install, so a normal start does not wait on pip.
-if [[ ! -f "$STAMP" ]] || ! cmp -s requirements.txt "$STAMP"; then
-  echo "installing dependencies"
-  "$VENV/bin/pip" install --quiet --upgrade pip
-  "$VENV/bin/pip" install --quiet -r requirements.txt
-  cp requirements.txt "$STAMP"
-else
-  echo "dependencies up to date"
+if [ "${SETUP_ONLY:-0}" = "1" ]; then
+    echo "Setup complete. Start with: ./run.sh"
+    exit 0
 fi
 
-if [[ "$setup_only" == true ]]; then
-  echo "setup complete. Start the bot with: ./run.sh"
-  exit 0
+if [ ! -f ".env" ]; then
+    echo "Creating .env configuration file from template..."
+    cp .env.example .env
+    echo
+    echo "IMPORTANT: .env still holds the placeholder credentials from the"
+    echo "template. Edit it before running the bot."
+    exit 1
 fi
 
-# --- configuration ---------------------------------------------------------
-if [[ ! -f .env ]]; then
-  echo
-  echo "no .env found. Creating one from .env.example — it defaults to the"
-  echo "mock adapter in paper mode, so it is safe to start as-is."
-  echo
-  cp .env.example .env
+# Refuse to start on the shipped placeholders — they would otherwise reach
+# mt5.login() and fail with a confusing broker error.
+if grep -q '^MT5_PASSWORD=YourPasswordHere' .env; then
+    echo "error: .env still contains the placeholder password." >&2
+    echo "Edit .env with your real broker credentials first." >&2
+    exit 1
 fi
 
-# Export everything defined in .env for the child process.
-set -a
-# shellcheck disable=SC1091
-source .env
-set +a
-
-if [[ "${NATIVE_MT5_MODE:-}" == "live" && "${MT5_RSI_DRY_RUN:-false}" != "true" ]]; then
-  echo
-  echo "  NATIVE_MT5_MODE=live — this will place real orders with real money."
-  echo "  Symbol: ${MT5_RSI_SYMBOL:-EURUSD}   Risk: ${MT5_RSI_RISK_PCT:-0.5}%/trade"
-  echo
-  read -r -p "  Type 'live' to continue: " confirm
-  [[ "$confirm" == "live" ]] || { echo "aborted."; exit 1; }
+if [ "${DRY_RUN:-false}" != "true" ]; then
+    symbol="$(grep -E '^MT5_SYMBOL=' .env | tail -1 | cut -d= -f2- || true)"
+    lots="$(grep -E '^LOT_SIZE=' .env | tail -1 | cut -d= -f2- || true)"
+    echo
+    echo "  This places REAL orders: ${symbol:-?} at ${lots:-?} lots per entry."
+    echo "  Set DRY_RUN=true in .env to watch it first."
+    echo
+    read -r -p "  Type 'trade' to continue: " confirm
+    [ "$confirm" = "trade" ] || { echo "aborted."; exit 1; }
 fi
 
-echo "starting — Ctrl-C to stop"
-exec "$VENV/bin/python" main.py
+echo "Launching MT5 RSI Bot..."
+exec ./venv/bin/python main.py

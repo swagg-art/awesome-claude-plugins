@@ -1,455 +1,437 @@
-"""RSI mean-reversion bot for MetaTrader 5.
+"""MetaTrader 5 RSI bot.
 
-Strategy, in one paragraph: on each newly *closed* candle, compute RSI. A buy
-fires when RSI crosses back up through the oversold line, a sell when it crosses
-back down through overbought. Crossing back — not merely being beyond the line —
-matters: RSI can pin under 20 for a long time in a downtrend, and a threshold
-test alone buys every bar of it. Stops and targets come from ATR so they scale
-with the instrument's current volatility, and the lot size is whatever risks
-`RISK_PCT` of the balance if the stop is hit.
+Watches one symbol, and on each newly closed candle looks for RSI crossing back
+through the oversold or overbought line. A cross back up through oversold buys,
+a cross back down through overbought sells. Stops and targets go on with the
+order, so a disconnection cannot leave a position unprotected.
 
-Execution safety is not reimplemented here. The bot runs on top of the
-``native_mt5`` package and inherits its Guard: volume caps, position caps, the
-symbol allowlist, and readonly/paper/live modes. On top of that it adds a daily
-loss limit, which is the one thing an unattended process most needs.
-
-This is a working implementation of a well-known textbook strategy. It is not a
-validated edge, and nothing here has been backtested. Run it in paper mode and
-form your own view before it touches money.
+Not a validated edge. Textbook RSI mean reversion, implemented carefully.
+Paper-trade it and form your own view before it touches money.
 """
 
-from __future__ import annotations
-
-import logging
 import signal
 import sys
 import time
-from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from native_mt5.adapters.base import AdapterError
-from native_mt5.risk import RiskError
-from native_mt5.safety import (
-    OrderIntent,
-    SafetyError,
-    TradeMode,
-    confirmation_token,
-)
-from native_mt5.session import Session
+import pandas as pd
 
-from config import BotConfig, ConfigError, load
+from config import Config
 
-log = logging.getLogger("mt5_rsi_bot")
+# Imported defensively so the pure functions below (RSI, signal detection, stop
+# arithmetic) can be imported and tested on any platform. The package only
+# publishes Windows wheels; initialize_mt5 gives a real explanation if it is
+# missing when it actually matters.
+try:
+    import MetaTrader5 as mt5
+except ImportError:
+    mt5 = None
+
+
+RUNNING = True
+
+
+def log(message, *, level="INFO"):
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    stream = sys.stderr if level in {"ERROR", "WARN"} else sys.stdout
+    print(f"{stamp} {level:<5} {message}", file=stream, flush=True)
 
 
 # ---------------------------------------------------------------------------
-# Indicators
-#
-# Wilder's smoothing throughout, which is what MetaTrader's own RSI and ATR use.
-# A simple moving average over the same period gives visibly different numbers
-# and would make the bot disagree with the chart the user is looking at.
+# Indicator
 # ---------------------------------------------------------------------------
 
 
-def rsi(closes: list[float], period: int) -> float | None:
-    """Wilder's RSI over the closing prices. None if there is too little data."""
+def compute_rsi(closes, period):
+    """Wilder's RSI: SMA seed, then recursive smoothing.
 
-    if len(closes) < period + 1:
+    This is what MetaTrader's own RSI indicator draws, so the numbers here match
+    the chart. An unseeded EWM — what several convenience libraries use — is off
+    by several points until it has warmed up.
+
+    Returns a pandas Series aligned with `closes`, NaN until there is enough
+    data.
+    """
+
+    closes = pd.Series(closes, dtype="float64").reset_index(drop=True)
+    delta = closes.diff()
+    gain = delta.clip(lower=0)
+    loss = (-delta).clip(lower=0)
+
+    avg_gain = gain.rolling(period).mean().copy()
+    avg_loss = loss.rolling(period).mean().copy()
+
+    for i in range(period + 1, len(closes)):
+        avg_gain.iloc[i] = (avg_gain.iloc[i - 1] * (period - 1) + gain.iloc[i]) / period
+        avg_loss.iloc[i] = (avg_loss.iloc[i - 1] * (period - 1) + loss.iloc[i]) / period
+
+    rs = avg_gain / avg_loss
+    rsi = 100 - 100 / (1 + rs)
+    # avg_loss of zero means an unbroken run of gains: RSI is 100, not NaN.
+    rsi[(avg_loss == 0) & (avg_gain > 0)] = 100.0
+    rsi[(avg_loss == 0) & (avg_gain == 0)] = 50.0
+    return rsi
+
+
+def detect_signal(previous_rsi, current_rsi):
+    """"BUY", "SELL" or None from two consecutive closed-bar RSI readings.
+
+    The test is a *cross back through* the line, not merely being beyond it.
+    RSI can sit under 30 for the whole of a downtrend; a plain threshold test
+    buys every bar of it.
+    """
+
+    if previous_rsi is None or current_rsi is None:
+        return None
+    if pd.isna(previous_rsi) or pd.isna(current_rsi):
         return None
 
-    gains, losses = [], []
-    for previous, current in zip(closes[:-1], closes[1:], strict=True):
-        change = current - previous
-        gains.append(max(change, 0.0))
-        losses.append(max(-change, 0.0))
-
-    avg_gain = sum(gains[:period]) / period
-    avg_loss = sum(losses[:period]) / period
-    for gain, loss in zip(gains[period:], losses[period:], strict=True):
-        avg_gain = (avg_gain * (period - 1) + gain) / period
-        avg_loss = (avg_loss * (period - 1) + loss) / period
-
-    if avg_loss == 0:
-        return 100.0 if avg_gain > 0 else 50.0
-    return 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+    if previous_rsi < Config.RSI_OVERSOLD <= current_rsi:
+        return "BUY"
+    if previous_rsi > Config.RSI_OVERBOUGHT >= current_rsi:
+        return "SELL"
+    return None
 
 
-def atr(candles: list[dict], period: int) -> float | None:
-    """Wilder's Average True Range. None if there is too little data."""
+# ---------------------------------------------------------------------------
+# Broker
+# ---------------------------------------------------------------------------
 
-    if len(candles) < period + 1:
-        return None
 
-    true_ranges = []
-    for previous, current in zip(candles[:-1], candles[1:], strict=True):
-        true_ranges.append(
-            max(
-                current["high"] - current["low"],
-                abs(current["high"] - previous["close"]),
-                abs(current["low"] - previous["close"]),
-            )
+def initialize_mt5():
+    if mt5 is None:
+        log(
+            "the MetaTrader5 package is not installed. It publishes Windows "
+            "wheels only — run this bot on Windows, or on Linux with the "
+            "terminal under Wine.",
+            level="ERROR",
         )
+        sys.exit(1)
 
-    value = sum(true_ranges[:period]) / period
-    for tr in true_ranges[period:]:
-        value = (value * (period - 1) + tr) / period
-    return value
+    if not mt5.initialize():
+        log(f"MT5 initialization failed: {mt5.last_error()}", level="ERROR")
+        sys.exit(1)
+
+    if Config.LOGIN and Config.PASSWORD and Config.SERVER:
+        if not mt5.login(Config.LOGIN, password=Config.PASSWORD, server=Config.SERVER):
+            log(
+                f"failed to log into account {Config.LOGIN}: {mt5.last_error()}",
+                level="ERROR",
+            )
+            mt5.shutdown()
+            sys.exit(1)
+        log(f"logged into account {Config.LOGIN} on {Config.SERVER}")
+
+    account = mt5.account_info()
+    if account is None:
+        log(f"could not read the account: {mt5.last_error()}", level="ERROR")
+        mt5.shutdown()
+        sys.exit(1)
+
+    # A symbol the terminal has not selected returns None for everything.
+    info = mt5.symbol_info(Config.SYMBOL)
+    if info is None:
+        log(
+            f"symbol {Config.SYMBOL} is unknown to this broker. Brokers rename "
+            "instruments (BTCUSD.m, BTCUSD_i); check Market Watch for the exact "
+            "spelling.",
+            level="ERROR",
+        )
+        mt5.shutdown()
+        sys.exit(1)
+    if not info.visible and not mt5.symbol_select(Config.SYMBOL, True):
+        log(f"could not select {Config.SYMBOL} in Market Watch", level="ERROR")
+        mt5.shutdown()
+        sys.exit(1)
+
+    validate_against_symbol(mt5.symbol_info(Config.SYMBOL))
+
+    log(f"account {account.login}: balance {account.balance:.2f} {account.currency}")
+    log(f"strategy: {Config.describe()}")
+    if Config.DRY_RUN:
+        log("DRY_RUN is on — signals are logged, no orders are sent")
+    return account
 
 
-def ema(values: list[float], period: int) -> float | None:
-    """Exponential moving average, seeded with an SMA of the first `period`."""
+def validate_against_symbol(info):
+    """Check the configured lot size and stop distance against the contract.
 
-    if len(values) < period:
-        return None
-    multiplier = 2.0 / (period + 1)
-    value = sum(values[:period]) / period
-    for price in values[period:]:
-        value = (price - value) * multiplier + value
-    return value
+    This is where a unit mistake gets caught. `SL_PIPS * point` on a two-digit
+    symbol is a rounding error, not a stop, and the broker would either reject
+    the order or fill it into an instant stop-out.
+    """
 
+    if not (info.volume_min <= Config.LOT_SIZE <= info.volume_max):
+        log(
+            f"LOT_SIZE {Config.LOT_SIZE} is outside {Config.SYMBOL}'s allowed "
+            f"range {info.volume_min}–{info.volume_max}",
+            level="ERROR",
+        )
+        sys.exit(2)
 
-# ---------------------------------------------------------------------------
-# Signal
-# ---------------------------------------------------------------------------
+    steps = Config.LOT_SIZE / info.volume_step
+    if abs(steps - round(steps)) > 1e-6:
+        log(
+            f"LOT_SIZE {Config.LOT_SIZE} is not a multiple of {Config.SYMBOL}'s "
+            f"volume step {info.volume_step}",
+            level="ERROR",
+        )
+        sys.exit(2)
 
+    tick = mt5.symbol_info_tick(Config.SYMBOL)
+    if tick is None or not tick.ask:
+        log("could not read a tick to sanity-check the stop distance", level="WARN")
+        return
 
-@dataclass(frozen=True)
-class Signal:
-    side: str  # "buy" | "sell"
-    reason: str
-    rsi_now: float
-    rsi_previous: float
+    _, _, distance = Config.stop_levels("BUY", tick.ask, info.point, info.digits)
+    distance_pct = 100 * distance / tick.ask
+    spread = tick.ask - tick.bid
 
+    if distance_pct < Config.MIN_STOP_PERCENT:
+        log(
+            f"REFUSING TO START: the configured stop is {distance:.{info.digits}f} "
+            f"on a price of {tick.ask:.{info.digits}f} — {distance_pct:.4f}% of "
+            f"price, below the {Config.MIN_STOP_PERCENT}% floor. On {Config.SYMBOL} "
+            f"a point is {info.point}, so SL_PIPS is not the unit you think it is. "
+            "Use SL_MODE=percent, or raise SL_PIPS to match this instrument.",
+            level="ERROR",
+        )
+        sys.exit(2)
 
-def evaluate(candles: list[dict], config: BotConfig) -> Signal | None:
-    """Look for an RSI cross-back on the most recently closed candle."""
+    if distance < spread * 3:
+        log(
+            f"REFUSING TO START: the stop ({distance:.{info.digits}f}) is within "
+            f"three spreads ({spread:.{info.digits}f}). It would be hit on entry.",
+            level="ERROR",
+        )
+        sys.exit(2)
 
-    closes = [c["close"] for c in candles]
-
-    rsi_now = rsi(closes, config.rsi_period)
-    rsi_previous = rsi(closes[:-1], config.rsi_period)
-    if rsi_now is None or rsi_previous is None:
-        log.warning("not enough history for RSI(%d) yet", config.rsi_period)
-        return None
-
-    crossed_up = rsi_previous <= config.rsi_oversold < rsi_now
-    crossed_down = rsi_previous >= config.rsi_overbought > rsi_now
-    if not (crossed_up or crossed_down):
-        return None
-
-    side = "buy" if crossed_up else "sell"
-    reason = (
-        f"RSI crossed {'up through' if crossed_up else 'down through'} "
-        f"{config.rsi_oversold if crossed_up else config.rsi_overbought:g} "
-        f"({rsi_previous:.1f} → {rsi_now:.1f})"
+    log(
+        f"stop distance {distance:.{info.digits}f} "
+        f"({distance_pct:.2f}% of price, spread {spread:.{info.digits}f})"
     )
 
-    if config.ema_trend_period:
-        trend = ema(closes, config.ema_trend_period)
-        if trend is None:
-            log.warning("not enough history for EMA(%d) yet", config.ema_trend_period)
-            return None
-        price = closes[-1]
-        if side == "buy" and price < trend:
-            log.info("skipping buy: price %.5f is below EMA %.5f", price, trend)
-            return None
-        if side == "sell" and price > trend:
-            log.info("skipping sell: price %.5f is above EMA %.5f", price, trend)
-            return None
-        reason += f", price {'above' if side == 'buy' else 'below'} EMA{config.ema_trend_period}"
 
-    return Signal(side=side, reason=reason, rsi_now=rsi_now, rsi_previous=rsi_previous)
+TIMEFRAMES = {
+    "M1": "TIMEFRAME_M1", "M5": "TIMEFRAME_M5", "M15": "TIMEFRAME_M15",
+    "M30": "TIMEFRAME_M30", "H1": "TIMEFRAME_H1", "H4": "TIMEFRAME_H4",
+    "D1": "TIMEFRAME_D1", "W1": "TIMEFRAME_W1", "MN1": "TIMEFRAME_MN1",
+}
+
+
+def get_latest_data():
+    """Closed candles with RSI attached, or None.
+
+    The final row from copy_rates_from_pos is the *forming* candle. Its RSI
+    moves with every tick and can cross a threshold and cross back before the
+    bar closes, so it is dropped here. Acting on closed bars only is the
+    difference between a signal and a rumour.
+    """
+
+    timeframe = getattr(mt5, TIMEFRAMES[Config.TIMEFRAME])
+    rates = mt5.copy_rates_from_pos(Config.SYMBOL, timeframe, 0, Config.BAR_COUNT + 1)
+    if rates is None or len(rates) < Config.RSI_PERIOD + 2:
+        return None
+
+    df = pd.DataFrame(rates)
+    df = df.iloc[:-1]  # drop the incomplete candle
+    df["rsi"] = compute_rsi(df["close"], Config.RSI_PERIOD)
+    return df
+
+
+def own_positions():
+    positions = mt5.positions_get(symbol=Config.SYMBOL)
+    if positions is None:
+        return []
+    return [p for p in positions if p.magic == Config.MAGIC_NUMBER]
+
+
+def open_position(action_type):
+    tick = mt5.symbol_info_tick(Config.SYMBOL)
+    info = mt5.symbol_info(Config.SYMBOL)
+    if not tick or not info:
+        log("failed to pull market tick info", level="ERROR")
+        return
+
+    if action_type == "BUY":
+        price, order_type = tick.ask, mt5.ORDER_TYPE_BUY
+    else:
+        price, order_type = tick.bid, mt5.ORDER_TYPE_SELL
+
+    sl, tp, distance = Config.stop_levels(action_type, price, info.point, info.digits)
+
+    log(
+        f"{action_type} {Config.LOT_SIZE} {Config.SYMBOL} @ {price:.{info.digits}f} "
+        f"sl {sl:.{info.digits}f} tp {tp:.{info.digits}f} "
+        f"(stop {100 * distance / price:.2f}% of price)"
+    )
+
+    if Config.DRY_RUN:
+        log("DRY_RUN: no order sent")
+        return
+
+    request = {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": Config.SYMBOL,
+        "volume": Config.LOT_SIZE,
+        "type": order_type,
+        "price": price,
+        "sl": sl,
+        "tp": tp,
+        "deviation": Config.DEVIATION,
+        "magic": Config.MAGIC_NUMBER,
+        "comment": "RSI Automated Entry",
+        "type_time": mt5.ORDER_TIME_GTC,
+        "type_filling": mt5.ORDER_FILLING_IOC,
+    }
+
+    result = mt5.order_send(request)
+
+    # order_send returns None on a transport failure. Reading .retcode off it
+    # raises AttributeError, which would kill the loop.
+    if result is None:
+        log(f"[{action_type} FAILED] order_send returned nothing: {mt5.last_error()}",
+            level="ERROR")
+        return
+
+    if result.retcode == mt5.TRADE_RETCODE_DONE:
+        log(f"[{action_type} SUCCESS] filled {result.volume} at {result.price}")
+    else:
+        log(
+            f"[{action_type} REJECTED] retcode {result.retcode}: {result.comment}",
+            level="ERROR",
+        )
 
 
 # ---------------------------------------------------------------------------
-# The bot
+# Daily loss limit
 # ---------------------------------------------------------------------------
 
 
 class DailyLossGuard:
-    """Stops the bot opening anything new once the day's budget is spent.
+    """Stops new entries once the day's budget is spent. Resets at UTC midnight.
 
-    An unattended process needs a floor it cannot argue with. This is that
-    floor, and it resets at UTC midnight.
-
-    It halts *new entries* rather than flattening open positions: those already
-    carry stops, and force-closing them at an arbitrary moment turns a managed
-    loss into a realised one. If your prop firm's rules require flat, close by
-    hand — the loud log line below is your cue.
+    It blocks entries rather than flattening: open positions already carry stops,
+    and force-closing them at an arbitrary moment turns a managed loss into a
+    realised one. If your account rules require flat, the error line below is
+    your cue to close by hand.
     """
 
-    def __init__(self, max_daily_loss_pct: float):
-        self.max_daily_loss_pct = max_daily_loss_pct
-        self._day: str | None = None
-        self._starting_equity: float | None = None
+    def __init__(self, limit_percent):
+        self.limit_percent = limit_percent
+        self._day = None
+        self._opening_equity = None
         self._tripped = False
 
-    def observe(self, equity: float) -> None:
+    def check(self, equity):
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if today != self._day:
             self._day = today
-            self._starting_equity = equity
+            self._opening_equity = equity
             self._tripped = False
-            log.info("new trading day %s, starting equity %.2f", today, equity)
+            log(f"new trading day {today}, opening equity {equity:.2f}")
 
-    def check(self, equity: float) -> bool:
-        """True while trading is allowed."""
-
-        if self._starting_equity is None or self._starting_equity <= 0:
+        if not self._opening_equity:
             return True
 
-        change_pct = 100.0 * (equity - self._starting_equity) / self._starting_equity
-        if change_pct > -self.max_daily_loss_pct:
+        change = 100 * (equity - self._opening_equity) / self._opening_equity
+        if change > -self.limit_percent:
             return True
 
         if not self._tripped:
             self._tripped = True
-            log.error(
-                "DAILY LOSS LIMIT HIT: equity %.2f is %.2f%% below the day's "
-                "opening %.2f (limit %.2f%%). No new positions until UTC midnight. "
-                "Open positions are left on their stops — close them by hand if "
-                "your account rules require flat.",
-                equity,
-                abs(change_pct),
-                self._starting_equity,
-                self.max_daily_loss_pct,
+            log(
+                f"DAILY LOSS LIMIT HIT: equity {equity:.2f} is {abs(change):.2f}% "
+                f"below today's opening {self._opening_equity:.2f} (limit "
+                f"{self.limit_percent:g}%). No new entries until UTC midnight. "
+                "Open positions keep their stops — close by hand if your account "
+                "rules require flat.",
+                level="ERROR",
             )
         return False
 
 
-class Bot:
-    def __init__(self, config: BotConfig, session: Session):
-        self.config = config
-        self.session = session
-        self.daily_loss = DailyLossGuard(config.max_daily_loss_pct)
-        self._last_bar: str | None = None
-        self._running = True
+# ---------------------------------------------------------------------------
+# Loop
+# ---------------------------------------------------------------------------
 
-    def stop(self, signum, _frame) -> None:
-        log.info("received %s, finishing this cycle and shutting down", signal.Signals(signum).name)
-        self._running = False
 
-    # -- market state ------------------------------------------------------
+def handle_stop(signum, _frame):
+    global RUNNING
+    RUNNING = False
+    log(f"received {signal.Signals(signum).name}, shutting down after this cycle")
 
-    def closed_candles(self) -> list[dict]:
-        """History with the still-forming bar dropped.
 
-        MetaTrader returns the current, incomplete candle as the last element.
-        Acting on it means the signal repaints and can fire several times for
-        what turns out to be one bar.
-        """
+def run_bot():
+    initialize_mt5()
+    signal.signal(signal.SIGTERM, handle_stop)
+    signal.signal(signal.SIGINT, handle_stop)
 
-        payload = self.session.candles(
-            self.config.symbol, self.config.timeframe, self.config.candle_count
-        )
-        return payload["candles"][:-1]
+    guard = DailyLossGuard(Config.MAX_DAILY_LOSS_PERCENT)
+    interactive = sys.stdout.isatty()
+    last_bar = None
 
-    def open_position(self):
-        positions = self.session.positions(self.config.symbol)["positions"]
-        return positions[0] if positions else None
-
-    # -- one iteration -----------------------------------------------------
-
-    def tick(self) -> None:
-        account = self.session.account()
-        self.daily_loss.observe(account["equity"])
-
-        candles = self.closed_candles()
-        if not candles:
-            log.warning("no closed candles returned for %s", self.config.symbol)
-            return
-
-        latest_bar = candles[-1]["time"]
-        if latest_bar == self._last_bar:
-            return  # same bar as last time; nothing new has happened
-        self._last_bar = latest_bar
-
-        volatility = atr(candles, self.config.atr_period)
-        if volatility is None or volatility <= 0:
-            log.warning("ATR(%d) unavailable, skipping this bar", self.config.atr_period)
-            return
-
-        signal_ = evaluate(candles, self.config)
-        position = self.open_position()
-
-        log.info(
-            "bar %s close %.5f atr %.5f | %s | %s",
-            latest_bar,
-            candles[-1]["close"],
-            volatility,
-            f"{signal_.side} — {signal_.reason}" if signal_ else "no signal",
-            f"holding {position['side']} {position['volume']}" if position else "flat",
-        )
-
-        if signal_ is None:
-            return
-
-        if position is not None:
-            if position["side"] != signal_.side:
-                self.close(position, signal_)
+    while RUNNING:
+        started = time.monotonic()
+        try:
+            df = get_latest_data()
+            if df is None or df.empty:
+                log(f"no candle data for {Config.SYMBOL}", level="WARN")
             else:
-                log.info("already holding a %s, not adding to it", position["side"])
-            return
+                bar_time = int(df["time"].iloc[-1])
+                current_rsi = df["rsi"].iloc[-1]
+                positions = own_positions()
 
-        if not self.daily_loss.check(account["equity"]):
-            return
+                if interactive:
+                    sys.stdout.write(
+                        f"\rRSI: {current_rsi:.2f} | open: {len(positions)}   "
+                    )
+                    sys.stdout.flush()
 
-        self.enter(signal_, candles[-1]["close"], volatility)
+                # Everything below acts once per closed bar, not once per poll.
+                if bar_time != last_bar:
+                    last_bar = bar_time
+                    previous_rsi = df["rsi"].iloc[-2]
+                    action = detect_signal(previous_rsi, current_rsi)
 
-    # -- actions -----------------------------------------------------------
+                    if interactive:
+                        sys.stdout.write("\r")
 
-    def close(self, position: dict, signal_: Signal) -> None:
-        log.info(
-            "closing %s #%s on the opposite signal (%s)",
-            position["side"],
-            position["ticket"],
-            signal_.reason,
-        )
-        if self.config.dry_run:
-            log.info("DRY RUN: would close #%s", position["ticket"])
-            return
-        try:
-            result = self.session.close_position(position["ticket"])
-            log.info("close result: %s", result["message"])
-        except (SafetyError, AdapterError) as exc:
-            log.error("could not close #%s: %s", position["ticket"], exc)
+                    log(
+                        f"bar {datetime.fromtimestamp(bar_time, timezone.utc):%Y-%m-%d %H:%M} "
+                        f"close {df['close'].iloc[-1]} rsi {previous_rsi:.2f} → "
+                        f"{current_rsi:.2f} | {action or 'no signal'} | "
+                        f"{len(positions)} open"
+                    )
 
-    def enter(self, signal_: Signal, price: float, volatility: float) -> None:
-        distance = volatility * self.config.atr_stop_multiple
-        target = volatility * self.config.atr_target_multiple
+                    if action and len(positions) >= Config.MAX_OPEN_POSITIONS:
+                        log(
+                            f"{action} signal ignored: already at "
+                            f"{Config.MAX_OPEN_POSITIONS} open position(s)"
+                        )
+                    elif action:
+                        account = mt5.account_info()
+                        if account is None:
+                            log("could not read equity, skipping entry", level="WARN")
+                        elif guard.check(account.equity):
+                            log(f"[SIGNAL] {action} — RSI {previous_rsi:.2f} → "
+                                f"{current_rsi:.2f}")
+                            open_position(action)
 
-        if signal_.side == "buy":
-            stop_loss, take_profit = price - distance, price + target
-        else:
-            stop_loss, take_profit = price + distance, price - target
+        except Exception as exc:  # noqa: BLE001 — one bad cycle must not stop the bot
+            log(f"cycle failed ({type(exc).__name__}): {exc}", level="ERROR")
 
-        try:
-            sized = self.session.size_position(
-                self.config.symbol,
-                signal_.side,
-                entry=price,
-                stop_loss=stop_loss,
-                risk_pct=self.config.risk_pct,
-                take_profit=take_profit,
-            )
-        except (RiskError, AdapterError) as exc:
-            log.error("could not size the trade: %s", exc)
-            return
+        # Sleep in slices so SIGTERM does not wait out a whole poll interval.
+        remaining = max(Config.POLL_SECONDS - (time.monotonic() - started), 0)
+        while RUNNING and remaining > 0:
+            nap = min(remaining, 1.0)
+            time.sleep(nap)
+            remaining -= nap
 
-        log.info(
-            "%s %s %.2f lots @ ~%.5f, stop %.5f, target %.5f — risking %.2f (%s)",
-            signal_.side.upper(),
-            self.config.symbol,
-            sized["volume"],
-            price,
-            stop_loss,
-            take_profit,
-            sized["loss_at_stop"],
-            signal_.reason,
-        )
-
-        if self.config.dry_run:
-            log.info("DRY RUN: no order sent")
-            return
-
-        # The confirmation token exists to stop an AI agent executing without a
-        # human having read a preview. An unattended bot is a different case:
-        # the operator authorised this strategy and these limits when they
-        # started the service, not each individual fill. So the bot mints the
-        # token for the order it just built. Do not copy this into an
-        # agent-driven path — there, the whole point is that a person sees the
-        # preview first.
-        intent = OrderIntent(
-            self.config.symbol,
-            signal_.side,
-            sized["volume"],
-            stop_loss,
-            take_profit,
-            comment="rsi-bot",
-        )
-
-        try:
-            result = self.session.place_order(
-                self.config.symbol,
-                signal_.side,
-                sized["volume"],
-                stop_loss=stop_loss,
-                take_profit=take_profit,
-                comment="rsi-bot",
-                confirm_token=confirmation_token(intent),
-            )
-        except (SafetyError, AdapterError) as exc:
-            log.error("order refused: %s", exc)
-            return
-
-        if result.get("ok"):
-            log.info("filled: %s", result["message"])
-        else:
-            log.error("not filled: %s", result["message"])
-
-    # -- loop --------------------------------------------------------------
-
-    def run(self) -> None:
-        log.info("strategy: %s", self.config.describe())
-        log.info("broker: %s", self.session.status()["note"])
-        if self.config.dry_run:
-            log.info("DRY RUN is on — signals are logged, no orders are sent")
-
-        while self._running:
-            started = time.monotonic()
-            try:
-                self.tick()
-            except AdapterError as exc:
-                log.error("broker error, will retry next cycle: %s", exc)
-            except Exception:  # noqa: BLE001 — a crash here stops the service
-                log.exception("unexpected error, continuing")
-
-            # Sleep in slices so a SIGTERM does not wait out a long poll.
-            elapsed = time.monotonic() - started
-            remaining = max(self.config.poll_seconds - elapsed, 0)
-            while self._running and remaining > 0:
-                nap = min(remaining, 1.0)
-                time.sleep(nap)
-                remaining -= nap
-
-        log.info("stopped")
-
-
-def main() -> int:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)-7s %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        stream=sys.stdout,
-    )
-
-    try:
-        bot_config, broker_config = load()
-    except ConfigError as exc:
-        log.error("configuration problem: %s", exc)
-        return 2
-
-    if broker_config.mode is TradeMode.LIVE and not bot_config.dry_run:
-        log.warning("=" * 70)
-        log.warning("LIVE MODE — this process will place real orders with real money.")
-        log.warning("=" * 70)
-
-    try:
-        session = Session(broker_config).open()
-    except AdapterError as exc:
-        log.error("could not connect to the broker: %s", exc)
-        return 1
-
-    bot = Bot(bot_config, session)
-    signal.signal(signal.SIGTERM, bot.stop)
-    signal.signal(signal.SIGINT, bot.stop)
-
-    try:
-        bot.run()
-    finally:
-        session.close()
-    return 0
+    if mt5 is not None:
+        mt5.shutdown()
+    log("stopped")
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    run_bot()

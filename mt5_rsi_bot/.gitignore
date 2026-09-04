@@ -1,8 +1,8 @@
-# .env holds broker credentials. Without this rule the first person to run
-# run.sh — which creates .env automatically — commits their MT5 password.
+# .env holds broker credentials. run.sh creates it automatically, so without
+# this rule the first person to run the bot commits their MT5 password.
 .env
 
-.venv/
+venv/
 __pycache__/
 *.py[cod]
 .ruff_cache/

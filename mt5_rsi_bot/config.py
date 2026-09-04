@@ -1,179 +1,199 @@
-"""Configuration for the RSI bot, read once from the environment.
+"""Configuration, loaded from .env.
 
-Two namespaces are in play here, on purpose:
-
-* ``MT5_RSI_*``   — strategy and risk settings, defined below.
-* ``NATIVE_MT5_*`` — the broker connection and the hard safety caps, owned by
-  the ``native_mt5`` package this bot runs on top of.
-
-Keeping them separate means the caps that stop the bot doing damage are the
-same ones the MCP server enforces, configured the same way, rather than a
-second implementation that can drift.
+Every value is validated at startup rather than at the moment it would first
+cause a bad order. A bot that refuses to start is cheap; one that starts with a
+two-dollar stop on Bitcoin is not.
 """
 
-from __future__ import annotations
-
 import os
-from dataclasses import dataclass
+import sys
+from pathlib import Path
 
-from native_mt5.adapters.base import TIMEFRAME_MINUTES
-from native_mt5.config import Config as BrokerConfig
-from native_mt5.safety import TradeMode
+from dotenv import load_dotenv
 
-ENV_PREFIX = "MT5_RSI_"
+# Explicit path rather than a cwd search: systemd sets WorkingDirectory, but a
+# manual `python /path/to/main.py` from elsewhere would otherwise silently pick
+# up no .env at all and run on defaults.
+load_dotenv(Path(__file__).with_name(".env"))
 
 
 class ConfigError(ValueError):
-    """The environment describes a bot we should not start."""
+    """The environment describes a bot that should not start."""
 
 
-def _env(name: str, default: str = "") -> str:
-    return os.environ.get(ENV_PREFIX + name, default).strip()
-
-
-def _env_float(name: str, default: float) -> float:
-    raw = _env(name)
-    if not raw:
-        return default
-    try:
-        return float(raw)
-    except ValueError as exc:
-        raise ConfigError(f"{ENV_PREFIX}{name} must be a number, got {raw!r}") from exc
-
-
-def _env_int(name: str, default: int) -> int:
-    raw = _env(name)
+def _int(name, default):
+    raw = os.getenv(name, "").strip()
     if not raw:
         return default
     try:
         return int(raw)
-    except ValueError as exc:
-        raise ConfigError(f"{ENV_PREFIX}{name} must be an integer, got {raw!r}") from exc
+    except ValueError:
+        raise ConfigError(f"{name} must be a whole number, got {raw!r}") from None
 
 
-@dataclass(frozen=True)
-class BotConfig:
-    """Everything the strategy loop needs, already validated."""
+def _float(name, default):
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        raise ConfigError(f"{name} must be a number, got {raw!r}") from None
 
-    symbol: str = "EURUSD"
-    timeframe: str = "M15"
+
+def _str(name, default=""):
+    return os.getenv(name, default).strip()
+
+
+def _bool(name, default=False):
+    raw = os.getenv(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+class Config:
+    # -- account -----------------------------------------------------------
+    LOGIN = _int("MT5_LOGIN", 0)
+    PASSWORD = _str("MT5_PASSWORD")
+    SERVER = _str("MT5_SERVER")
+    SYMBOL = _str("MT5_SYMBOL", "BTCUSD").upper()
+    TIMEFRAME = _str("MT5_TIMEFRAME", "M15").upper()
+
+    # -- order -------------------------------------------------------------
+    LOT_SIZE = _float("LOT_SIZE", 0.01)
+    MAGIC_NUMBER = _int("MAGIC_NUMBER", 123456)
+    DEVIATION = _int("DEVIATION", 20)
 
     # -- signal ------------------------------------------------------------
-    rsi_period: int = 14
-    rsi_oversold: float = 30.0
-    rsi_overbought: float = 70.0
-    ema_trend_period: int = 0  # 0 disables the trend filter
+    RSI_PERIOD = _int("RSI_PERIOD", 14)
+    RSI_OVERSOLD = _float("RSI_OVERSOLD", 30)
+    RSI_OVERBOUGHT = _float("RSI_OVERBOUGHT", 70)
+    BAR_COUNT = _int("BAR_COUNT", 100)
 
-    # -- stops and targets -------------------------------------------------
-    atr_period: int = 14
-    atr_stop_multiple: float = 2.0
-    atr_target_multiple: float = 3.0
+    # -- stops -------------------------------------------------------------
+    # "percent" scales with the instrument's price and is the safe default.
+    # "points" is the raw MetaTrader unit — correct only if you have checked
+    # what a point is worth on the symbol you are trading.
+    SL_MODE = _str("SL_MODE", "percent").lower()
+    SL_PERCENT = _float("SL_PERCENT", 1.0)
+    TP_PERCENT = _float("TP_PERCENT", 2.0)
+    SL_PIPS = _int("SL_PIPS", 200)
+    TP_PIPS = _int("TP_PIPS", 400)
 
-    # -- risk --------------------------------------------------------------
-    risk_pct: float = 0.5
-    max_daily_loss_pct: float = 2.0
+    # A stop closer than this fraction of price is almost certainly a unit
+    # mistake, not a plan. See validate().
+    MIN_STOP_PERCENT = _float("MIN_STOP_PERCENT", 0.1)
 
-    # -- loop --------------------------------------------------------------
-    poll_seconds: int = 30
-    candle_count: int = 200
-    dry_run: bool = False
+    # -- safety ------------------------------------------------------------
+    MAX_DAILY_LOSS_PERCENT = _float("MAX_DAILY_LOSS_PERCENT", 2.0)
+    MAX_OPEN_POSITIONS = _int("MAX_OPEN_POSITIONS", 1)
+    POLL_SECONDS = _int("POLL_SECONDS", 15)
+    DRY_RUN = _bool("DRY_RUN", False)
+
+    VALID_TIMEFRAMES = (
+        "M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1",
+    )
 
     @classmethod
-    def from_env(cls) -> BotConfig:
-        config = cls(
-            symbol=(_env("SYMBOL", "EURUSD") or "EURUSD").upper(),
-            timeframe=(_env("TIMEFRAME", "M15") or "M15").upper(),
-            rsi_period=_env_int("RSI_PERIOD", 14),
-            rsi_oversold=_env_float("RSI_OVERSOLD", 30.0),
-            rsi_overbought=_env_float("RSI_OVERBOUGHT", 70.0),
-            ema_trend_period=_env_int("EMA_TREND_PERIOD", 0),
-            atr_period=_env_int("ATR_PERIOD", 14),
-            atr_stop_multiple=_env_float("ATR_STOP_MULTIPLE", 2.0),
-            atr_target_multiple=_env_float("ATR_TARGET_MULTIPLE", 3.0),
-            risk_pct=_env_float("RISK_PCT", 0.5),
-            max_daily_loss_pct=_env_float("MAX_DAILY_LOSS_PCT", 2.0),
-            poll_seconds=_env_int("POLL_SECONDS", 30),
-            candle_count=_env_int("CANDLE_COUNT", 200),
-            dry_run=_env("DRY_RUN", "false").lower() in {"1", "true", "yes"},
-        )
-        config.validate()
-        return config
+    def validate(cls):
+        """Raise ConfigError on anything that would produce a bad order."""
 
-    def validate(self) -> None:
-        if self.timeframe not in TIMEFRAME_MINUTES:
-            allowed = ", ".join(TIMEFRAME_MINUTES)
-            raise ConfigError(f"TIMEFRAME must be one of: {allowed}")
-        if self.rsi_period < 2:
+        if not cls.SYMBOL:
+            raise ConfigError("MT5_SYMBOL cannot be empty")
+
+        if cls.TIMEFRAME not in cls.VALID_TIMEFRAMES:
+            raise ConfigError(
+                f"MT5_TIMEFRAME must be one of: {', '.join(cls.VALID_TIMEFRAMES)}"
+            )
+
+        # Partial credentials are worse than none: MT5 silently stays on
+        # whatever account the terminal already had open.
+        supplied = [bool(cls.LOGIN), bool(cls.PASSWORD), bool(cls.SERVER)]
+        if any(supplied) and not all(supplied):
+            raise ConfigError(
+                "MT5_LOGIN, MT5_PASSWORD and MT5_SERVER must be set together, or "
+                "all left blank to use the terminal's current login"
+            )
+
+        if cls.LOT_SIZE <= 0:
+            raise ConfigError(f"LOT_SIZE must be positive, got {cls.LOT_SIZE}")
+
+        if cls.RSI_PERIOD < 2:
             raise ConfigError("RSI_PERIOD must be at least 2")
-        if not 0 < self.rsi_oversold < self.rsi_overbought < 100:
+
+        if not 0 < cls.RSI_OVERSOLD < cls.RSI_OVERBOUGHT < 100:
             raise ConfigError(
                 "RSI thresholds must satisfy 0 < OVERSOLD < OVERBOUGHT < 100, got "
-                f"{self.rsi_oversold} and {self.rsi_overbought}"
+                f"{cls.RSI_OVERSOLD} and {cls.RSI_OVERBOUGHT}"
             )
-        if self.atr_period < 2:
-            raise ConfigError("ATR_PERIOD must be at least 2")
-        if self.atr_stop_multiple <= 0:
-            raise ConfigError("ATR_STOP_MULTIPLE must be greater than 0")
-        if self.atr_target_multiple <= 0:
-            raise ConfigError("ATR_TARGET_MULTIPLE must be greater than 0")
-        if not 0 < self.risk_pct <= 100:
-            raise ConfigError("RISK_PCT must be in (0, 100]")
-        if not 0 < self.max_daily_loss_pct <= 100:
-            raise ConfigError("MAX_DAILY_LOSS_PCT must be in (0, 100]")
-        if self.poll_seconds < 1:
-            raise ConfigError("POLL_SECONDS must be at least 1")
-        if self.ema_trend_period and self.ema_trend_period < 2:
-            raise ConfigError("EMA_TREND_PERIOD must be 0 (off) or at least 2")
 
-        # Enough history for the slowest indicator plus its warm-up.
-        needed = max(self.rsi_period, self.atr_period, self.ema_trend_period) * 3
-        if self.candle_count < needed:
+        if cls.BAR_COUNT < cls.RSI_PERIOD * 3:
             raise ConfigError(
-                f"CANDLE_COUNT of {self.candle_count} is too small for these "
-                f"periods; use at least {needed}"
+                f"BAR_COUNT of {cls.BAR_COUNT} is too little warm-up for "
+                f"RSI({cls.RSI_PERIOD}); use at least {cls.RSI_PERIOD * 3}"
             )
 
-    def describe(self) -> str:
-        trend = (
-            f"EMA{self.ema_trend_period} trend filter"
-            if self.ema_trend_period
-            else "no trend filter"
-        )
+        if cls.SL_MODE not in {"percent", "points"}:
+            raise ConfigError("SL_MODE must be 'percent' or 'points'")
+
+        if cls.SL_MODE == "percent":
+            if cls.SL_PERCENT <= 0 or cls.TP_PERCENT <= 0:
+                raise ConfigError("SL_PERCENT and TP_PERCENT must be positive")
+            if cls.SL_PERCENT >= 100:
+                raise ConfigError("SL_PERCENT of 100 or more would be past zero")
+        elif cls.SL_PIPS <= 0 or cls.TP_PIPS <= 0:
+            raise ConfigError("SL_PIPS and TP_PIPS must be positive")
+
+        if not 0 < cls.MAX_DAILY_LOSS_PERCENT <= 100:
+            raise ConfigError("MAX_DAILY_LOSS_PERCENT must be in (0, 100]")
+
+        if cls.MAX_OPEN_POSITIONS < 1:
+            raise ConfigError("MAX_OPEN_POSITIONS must be at least 1")
+
+        if cls.POLL_SECONDS < 1:
+            raise ConfigError("POLL_SECONDS must be at least 1")
+
+    @classmethod
+    def stop_levels(cls, side, price, point, digits):
+        """Return (stop_loss, take_profit) for an entry at `price`.
+
+        In points mode the distance is `SL_PIPS * point`, which is what the
+        original implementation did. Be careful with it: on a 2-digit symbol
+        like BTCUSD a point is 0.01, so 200 points is a two-dollar stop on a
+        sixty-thousand-dollar instrument. That is why percent is the default.
+        """
+
+        if cls.SL_MODE == "percent":
+            sl_distance = price * cls.SL_PERCENT / 100.0
+            tp_distance = price * cls.TP_PERCENT / 100.0
+        else:
+            sl_distance = cls.SL_PIPS * point
+            tp_distance = cls.TP_PIPS * point
+
+        if side == "BUY":
+            sl, tp = price - sl_distance, price + tp_distance
+        else:
+            sl, tp = price + sl_distance, price - tp_distance
+
+        return round(sl, digits), round(tp, digits), sl_distance
+
+    @classmethod
+    def describe(cls):
+        if cls.SL_MODE == "percent":
+            stops = f"stop {cls.SL_PERCENT:g}%, target {cls.TP_PERCENT:g}%"
+        else:
+            stops = f"stop {cls.SL_PIPS} points, target {cls.TP_PIPS} points"
         return (
-            f"{self.symbol} {self.timeframe} | "
-            f"RSI({self.rsi_period}) {self.rsi_oversold:g}/{self.rsi_overbought:g} | "
-            f"{trend} | "
-            f"stop {self.atr_stop_multiple:g}xATR({self.atr_period}), "
-            f"target {self.atr_target_multiple:g}xATR | "
-            f"risk {self.risk_pct:g}%/trade, {self.max_daily_loss_pct:g}%/day"
+            f"{cls.SYMBOL} {cls.TIMEFRAME} | "
+            f"RSI({cls.RSI_PERIOD}) {cls.RSI_OVERSOLD:g}/{cls.RSI_OVERBOUGHT:g} | "
+            f"{cls.LOT_SIZE} lots | {stops} | "
+            f"daily loss limit {cls.MAX_DAILY_LOSS_PERCENT:g}%"
         )
 
 
-def load() -> tuple[BotConfig, BrokerConfig]:
-    """Load both halves of the configuration and cross-check them."""
-
-    bot = BotConfig.from_env()
-    broker = BrokerConfig.from_env()
-
-    if broker.mode is TradeMode.READONLY and not bot.dry_run:
-        raise ConfigError(
-            "NATIVE_MT5_MODE is readonly, so the bot could never place an order. "
-            "Set it to paper to simulate, live to trade for real, or set "
-            "MT5_RSI_DRY_RUN=true to run the strategy for its logs alone."
-        )
-
-    if bot.risk_pct > broker.max_risk_per_trade_pct:
-        raise ConfigError(
-            f"MT5_RSI_RISK_PCT ({bot.risk_pct}%) exceeds the broker-side ceiling "
-            f"NATIVE_MT5_MAX_RISK_PER_TRADE_PCT ({broker.max_risk_per_trade_pct}%). "
-            "Raise the ceiling deliberately or lower the bot's risk."
-        )
-
-    if broker.symbol_allowlist and bot.symbol not in broker.symbol_allowlist:
-        allowed = ", ".join(broker.symbol_allowlist)
-        raise ConfigError(
-            f"MT5_RSI_SYMBOL is {bot.symbol}, which is not in "
-            f"NATIVE_MT5_SYMBOL_ALLOWLIST ({allowed})"
-        )
-
-    return bot, broker
+try:
+    Config.validate()
+except ConfigError as exc:
+    print(f"Configuration error: {exc}", file=sys.stderr)
+    raise SystemExit(2) from None

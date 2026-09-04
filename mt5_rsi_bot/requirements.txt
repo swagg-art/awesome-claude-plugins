@@ -1,13 +1,18 @@
-# The bot runs on the native_mt5 package in this repository: it reuses that
-# project's broker adapters, safety guards and position sizing rather than
-# reimplementing them. Installed as an editable path dependency so a change to
-# either side is picked up without a reinstall.
-#
-# If you ever lift mt5_rsi_bot out of this repo, replace this line with a
-# published requirement or vendor the package.
--e ../native-mt5
-
-# The real MetaTrader 5 terminal bridge. Windows wheels only — on macOS or
-# Linux this line is skipped and the bot can still run against the mock
-# adapter (NATIVE_MT5_ADAPTER=mock) for development.
 MetaTrader5>=5.0.45; sys_platform == 'win32'
+pandas>=2.0.0
+python-dotenv>=1.0.0
+
+# pandas-ta was dropped deliberately. Two reasons, both measured rather than
+# assumed:
+#
+# 1. The versions that `pandas-ta>=0.3.14b0` now resolves to require Python
+#    3.12+, so the install fails outright on 3.11.
+# 2. Its RSI uses an unseeded EWM rather than Wilder's SMA-seeded smoothing,
+#    which is what MetaTrader's own RSI indicator draws. Over the 100 bars this
+#    bot fetches the two agree closely (worst case 0.15 RSI points across 300
+#    random series, no threshold disagreements), but during warm-up they differ
+#    by 7+ points, and the bot would silently disagree with the chart you are
+#    looking at.
+#
+# RSI is ~15 lines. It now lives in main.py, matches Wilder's published value
+# on his canonical series, and has no beta dependency behind it.
