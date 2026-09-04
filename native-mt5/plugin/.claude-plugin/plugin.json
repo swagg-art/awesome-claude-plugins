@@ -1,0 +1,19 @@
+{
+  "name": "native-mt5",
+  "description": "Native MetaTrader 5 access for Claude: live quotes and OHLC history, account and position state, risk-based position sizing, and order execution behind explicit safety guards.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Native MT5"
+  },
+  "license": "MIT",
+  "keywords": [
+    "metatrader",
+    "mt5",
+    "trading",
+    "forex",
+    "market-data",
+    "risk-management",
+    "mcp"
+  ],
+  "mcpServers": "./.mcp.json"
+}

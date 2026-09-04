@@ -1,0 +1,49 @@
+name: native-mt5
+
+on:
+  push:
+    branches: [main]
+    paths: ['native-mt5/**', '.github/workflows/native-mt5.yml']
+  pull_request:
+    branches: [main]
+    paths: ['native-mt5/**', '.github/workflows/native-mt5.yml']
+
+jobs:
+  test:
+    name: test (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+
+    defaults:
+      run:
+        working-directory: native-mt5
+
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # The core logic has no third-party imports, so this proves the suite
+      # still runs on a checkout with nothing installed.
+      - name: Run tests without dependencies
+        run: PYTHONPATH=src python -m unittest discover -s tests
+
+      - name: Install with the server extra
+        run: pip install -e '.[server,dev]'
+
+      - name: Run tests with the MCP server
+        run: pytest -q
+
+      - name: Lint
+        run: ruff check src tests

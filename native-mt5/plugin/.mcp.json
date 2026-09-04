@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "native-mt5": {
+      "command": "python3",
+      "args": ["-m", "native_mt5"],
+      "env": {
+        "NATIVE_MT5_ADAPTER": "mock",
+        "NATIVE_MT5_MODE": "readonly",
+        "NATIVE_MT5_MAX_RISK_PER_TRADE_PCT": "1.0",
+        "NATIVE_MT5_MAX_ORDER_VOLUME": "1.0"
+      }
+    }
+  }
+}
