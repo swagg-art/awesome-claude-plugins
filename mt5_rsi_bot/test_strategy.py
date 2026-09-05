@@ -19,6 +19,7 @@ from strategy import (
     hammer,
     levels_from_structure,
     morning_star,
+    passes_trend_filter,
     piercing_line,
     shooting_star,
     swing_highs,
@@ -205,3 +206,37 @@ class LevelTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TrendFilterTests(unittest.TestCase):
+    """The direction filter shared by the live bot and the backtester."""
+
+    def test_no_trend_value_lets_everything_through(self):
+        self.assertTrue(passes_trend_filter("BUY", 100.0, None))
+        self.assertTrue(passes_trend_filter("SELL", 100.0, None))
+
+    def test_nan_trend_lets_everything_through(self):
+        """The EMA is NaN until it warms up; that must not silently block trades."""
+        nan = float("nan")
+        self.assertTrue(passes_trend_filter("BUY", 100.0, nan))
+        self.assertTrue(passes_trend_filter("SELL", 100.0, nan))
+
+    def test_buy_needs_price_above_the_ema(self):
+        self.assertTrue(passes_trend_filter("BUY", 105.0, 100.0))
+        self.assertFalse(passes_trend_filter("BUY", 95.0, 100.0))
+
+    def test_sell_needs_price_below_the_ema(self):
+        self.assertTrue(passes_trend_filter("SELL", 95.0, 100.0))
+        self.assertFalse(passes_trend_filter("SELL", 105.0, 100.0))
+
+    def test_price_exactly_on_the_ema_is_rejected_both_ways(self):
+        self.assertFalse(passes_trend_filter("BUY", 100.0, 100.0))
+        self.assertFalse(passes_trend_filter("SELL", 100.0, 100.0))
+
+    def test_long_only_drops_sells_regardless_of_trend(self):
+        self.assertFalse(passes_trend_filter("SELL", 95.0, 100.0, long_only=True))
+        self.assertFalse(passes_trend_filter("SELL", 95.0, None, long_only=True))
+        self.assertTrue(passes_trend_filter("BUY", 105.0, 100.0, long_only=True))
+
+    def test_no_action_never_passes(self):
+        self.assertFalse(passes_trend_filter(None, 100.0, 50.0))

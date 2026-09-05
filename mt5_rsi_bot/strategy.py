@@ -426,6 +426,23 @@ def levels_from_structure(setup, entry_price, atr_value, *, atr_buffer=0.5,
     return stop, entry_price - distance * reward_multiple, distance
 
 
+def passes_trend_filter(action, price, trend, *, long_only=False):
+    """Whether a signal survives the direction filters.
+
+    `trend` is the EMA value on the signal bar; None or NaN means the filter is
+    off or not yet warmed up, and the signal passes untouched. Kept here, pure
+    and shared, so the live bot and the backtester cannot drift apart on it.
+    """
+
+    if action is None:
+        return False
+    if long_only and action == "SELL":
+        return False
+    if trend is None or trend != trend:  # NaN
+        return True
+    return price > trend if action == "BUY" else price < trend
+
+
 def average_true_range(df, period=14):
     """Wilder's ATR, as a list aligned with df. None until warmed up.
 

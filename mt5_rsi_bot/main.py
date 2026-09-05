@@ -17,7 +17,13 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from config import Config
-from strategy import arm_setup, average_true_range, confirms, levels_from_structure
+from strategy import (
+    arm_setup,
+    average_true_range,
+    confirms,
+    levels_from_structure,
+    passes_trend_filter,
+)
 
 # Imported defensively so the pure functions below (RSI, signal detection, stop
 # arithmetic) can be imported and tested on any platform. The package only
@@ -74,7 +80,14 @@ def compute_rsi(closes, period):
     return rsi
 
 
-def detect_signal(previous_rsi, current_rsi):
+def compute_ema(closes, period):
+    """EMA seeded with an SMA of the first `period` values, as MetaTrader does."""
+
+    closes = pd.Series(closes, dtype="float64").reset_index(drop=True)
+    return closes.ewm(span=period, adjust=False, min_periods=period).mean()
+
+
+def detect_signal(previous_rsi, current_rsi, price=None, trend=None):
     """"BUY", "SELL" or None from two consecutive closed-bar RSI readings.
 
     The test is a *cross back through* the line, not merely being beyond it.
@@ -88,10 +101,23 @@ def detect_signal(previous_rsi, current_rsi):
         return None
 
     if previous_rsi < Config.RSI_OVERSOLD <= current_rsi:
-        return "BUY"
-    if previous_rsi > Config.RSI_OVERBOUGHT >= current_rsi:
-        return "SELL"
-    return None
+        action = "BUY"
+    elif previous_rsi > Config.RSI_OVERBOUGHT >= current_rsi:
+        action = "SELL"
+    else:
+        return None
+
+    # Trade with the trend, not into it: buy only above the EMA, sell only
+    # below. Shared with the confirmed strategy and the backtester.
+    if not passes_trend_filter(
+        action,
+        price,
+        trend if Config.EMA_TREND_PERIOD else None,
+        long_only=Config.LONG_ONLY,
+    ):
+        return None
+
+    return action
 
 
 # ---------------------------------------------------------------------------
@@ -230,13 +256,18 @@ def get_latest_data():
     """
 
     timeframe = getattr(mt5, TIMEFRAMES[Config.TIMEFRAME])
+    needed = max(Config.RSI_PERIOD, Config.EMA_TREND_PERIOD) + 2
     rates = mt5.copy_rates_from_pos(Config.SYMBOL, timeframe, 0, Config.BAR_COUNT + 1)
-    if rates is None or len(rates) < Config.RSI_PERIOD + 2:
+    if rates is None or len(rates) < needed:
         return None
 
     df = pd.DataFrame(rates)
     df = df.iloc[:-1]  # drop the incomplete candle
     df["rsi"] = compute_rsi(df["close"], Config.RSI_PERIOD)
+    if Config.EMA_TREND_PERIOD:
+        df["ema"] = compute_ema(df["close"], Config.EMA_TREND_PERIOD)
+    else:
+        df["ema"] = float("nan")
     return df
 
 
@@ -465,7 +496,12 @@ def run_bot():
                 if bar_time != last_bar:
                     last_bar = bar_time
                     previous_rsi = df["rsi"].iloc[-2]
-                    action = detect_signal(previous_rsi, current_rsi)
+                    action = detect_signal(
+                        previous_rsi,
+                        current_rsi,
+                        price=df["close"].iloc[-1],
+                        trend=df["ema"].iloc[-1],
+                    )
 
                     if interactive:
                         sys.stdout.write("\r")

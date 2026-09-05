@@ -24,12 +24,13 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from config import Config
-from main import compute_rsi, detect_signal
+from main import compute_ema, compute_rsi, detect_signal
 from strategy import (
     arm_setup,
     average_true_range,
     confirms,
     levels_from_structure,
+    passes_trend_filter,
 )
 
 ASSUMPTIONS = """
@@ -257,7 +258,8 @@ class ConfirmedStrategy:
 
     def __init__(self, df, rsi, atr, *, oversold, overbought, confirm_within=5,
                  reward_multiple=2.0, atr_buffer=0.5, require_pattern=True,
-                 require_break=True, require_rsi_turn=True, divergence_only=False):
+                 require_break=True, require_rsi_turn=True, divergence_only=False,
+                 trend=None, long_only=False):
         self.df, self.rsi, self.atr = df, rsi, atr
         self.oversold, self.overbought = oversold, overbought
         self.confirm_within = confirm_within
@@ -266,6 +268,10 @@ class ConfirmedStrategy:
         self.require_break = require_break
         self.require_rsi_turn = require_rsi_turn
         self.divergence_only = divergence_only
+        # EMA on the signal bar, or None for no trend filter.
+        self.trend = trend
+        self.long_only = long_only
+        self.filtered_count = 0
 
         self.setup = None
         self._fired = None
@@ -309,10 +315,22 @@ class ConfirmedStrategy:
         if reasons is None:
             return None
 
+        side = self.setup.side
+
+        # The direction filter is applied after confirmation, so the counters
+        # still show how many setups the strategy itself produced.
+        trend_value = self.trend[signal_bar] if self.trend is not None else None
+        if not passes_trend_filter(
+            side, self.df["close"].iloc[signal_bar], trend_value,
+            long_only=self.long_only,
+        ):
+            self.setup = None
+            self.filtered_count += 1
+            return None
+
         self._fired = self.setup
         self.last_reasons = self.setup.reasons + reasons
         self.confirmed_count += 1
-        side = self.setup.side
         self.setup = None
         return side
 
@@ -331,7 +349,7 @@ class ConfirmedStrategy:
 def run_confirmed_backtest(df, *, spread=0.0, contract_size=1.0,
                            starting_equity=10_000.0, apply_daily_limit=True,
                            rsi_period=None, oversold=None, overbought=None,
-                           **strategy_kwargs):
+                           ema_period=0, **strategy_kwargs):
     """Backtest the confirmed strategy. Returns (Result, ConfirmedStrategy)."""
 
     rsi_period = rsi_period or Config.RSI_PERIOD
@@ -340,9 +358,11 @@ def run_confirmed_backtest(df, *, spread=0.0, contract_size=1.0,
 
     rsi = compute_rsi(df["close"], rsi_period).to_numpy()
     atr = average_true_range(df, rsi_period)
+    trend = compute_ema(df["close"], ema_period).to_numpy() if ema_period else None
 
     strategy = ConfirmedStrategy(
-        df, rsi, atr, oversold=oversold, overbought=overbought, **strategy_kwargs
+        df, rsi, atr, oversold=oversold, overbought=overbought, trend=trend,
+        **strategy_kwargs
     )
     result = _simulate(df, strategy.decide, strategy.levels, spread, contract_size,
                        starting_equity, apply_daily_limit)

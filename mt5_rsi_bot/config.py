@@ -81,6 +81,14 @@ class Config:
     RSI_PERIOD = _int("RSI_PERIOD", 14)
     RSI_OVERSOLD = _float("RSI_OVERSOLD", 30)
     RSI_OVERBOUGHT = _float("RSI_OVERBOUGHT", 70)
+
+    # Only buy above the EMA, only sell below it. 0 disables the filter.
+    # Mean reversion against a strong trend is where this strategy bleeds.
+    EMA_TREND_PERIOD = _int("EMA_TREND_PERIOD", 0)
+
+    # Skip short signals entirely. Worth trying on an asset with a structural
+    # upward drift, where shorts fight the tide.
+    LONG_ONLY = _bool("LONG_ONLY", False)
     BAR_COUNT = _int("BAR_COUNT", 300)
 
     # -- stops -------------------------------------------------------------
@@ -138,6 +146,17 @@ class Config:
             raise ConfigError(
                 "RSI thresholds must satisfy 0 < OVERSOLD < OVERBOUGHT < 100, got "
                 f"{cls.RSI_OVERSOLD} and {cls.RSI_OVERBOUGHT}"
+            )
+
+        if cls.EMA_TREND_PERIOD and cls.EMA_TREND_PERIOD < 2:
+            raise ConfigError("EMA_TREND_PERIOD must be 0 (off) or at least 2")
+
+        warmup = max(cls.RSI_PERIOD, cls.EMA_TREND_PERIOD)
+        if cls.BAR_COUNT < warmup * 3:
+            raise ConfigError(
+                f"BAR_COUNT of {cls.BAR_COUNT} is too little warm-up for "
+                f"RSI({cls.RSI_PERIOD})/EMA({cls.EMA_TREND_PERIOD}); "
+                f"use at least {warmup * 3}"
             )
 
         if cls.BAR_COUNT < cls.RSI_PERIOD * 3:
@@ -216,10 +235,12 @@ class Config:
             stops = f"stop {cls.SL_PERCENT:g}%, target {cls.TP_PERCENT:g}%"
         else:
             stops = f"stop {cls.SL_PIPS} points, target {cls.TP_PIPS} points"
+        trend = f"EMA{cls.EMA_TREND_PERIOD}" if cls.EMA_TREND_PERIOD else "no trend filter"
+        direction = "long only" if cls.LONG_ONLY else "both ways"
         return (
             f"[{cls.STRATEGY}] {cls.SYMBOL} {cls.TIMEFRAME} | "
             f"RSI({cls.RSI_PERIOD}) {cls.RSI_OVERSOLD:g}/{cls.RSI_OVERBOUGHT:g} | "
-            f"{cls.LOT_SIZE} lots | {stops} | "
+            f"{trend} | {direction} | {cls.LOT_SIZE} lots | {stops} | "
             f"daily loss limit {cls.MAX_DAILY_LOSS_PERCENT:g}%"
         )
 
