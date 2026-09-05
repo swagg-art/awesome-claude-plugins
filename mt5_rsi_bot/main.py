@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from config import Config
+from strategy import arm_setup, average_true_range, confirms, levels_from_structure
 
 # Imported defensively so the pure functions below (RSI, signal detection, stop
 # arithmetic) can be imported and tested on any platform. The package only
@@ -246,7 +247,13 @@ def own_positions():
     return [p for p in positions if p.magic == Config.MAGIC_NUMBER]
 
 
-def open_position(action_type):
+def open_position(action_type, levels=None):
+    """Send a market order. `levels` overrides the configured stop model.
+
+    The confirmed strategy passes (stop_loss, take_profit) derived from the
+    swing the setup formed on; the simple strategy passes nothing and gets
+    Config's fixed percentages.
+    """
     tick = mt5.symbol_info_tick(Config.SYMBOL)
     info = mt5.symbol_info(Config.SYMBOL)
     if not tick or not info:
@@ -258,7 +265,19 @@ def open_position(action_type):
     else:
         price, order_type = tick.bid, mt5.ORDER_TYPE_SELL
 
-    sl, tp, distance = Config.stop_levels(action_type, price, info.point, info.digits)
+    if levels is None:
+        sl, tp, distance = Config.stop_levels(action_type, price, info.point, info.digits)
+    else:
+        sl, tp = round(levels[0], info.digits), round(levels[1], info.digits)
+        distance = abs(price - sl)
+
+    # A structure stop is only as good as its distance. Refuse a stop the
+    # spread would take out, whatever produced it.
+    spread = tick.ask - tick.bid
+    if distance < spread * 3:
+        log(f"skipping {action_type}: stop is {distance:.{info.digits}f}, within "
+            f"three spreads ({spread:.{info.digits}f})", level="WARN")
+        return
 
     log(
         f"{action_type} {Config.LOT_SIZE} {Config.SYMBOL} @ {price:.{info.digits}f} "
@@ -356,6 +375,58 @@ class DailyLossGuard:
 # ---------------------------------------------------------------------------
 
 
+def evaluate_confirmed(df, setup, bars_since_armed):
+    """One bar of the confirmed strategy. Returns (action, levels, setup, age).
+
+    Deliberately the same three calls the backtester makes — arm_setup,
+    confirms, levels_from_structure — so the live bot and the measured strategy
+    cannot drift apart.
+    """
+    rsi = df["rsi"].to_numpy()
+    atr = average_true_range(df, Config.RSI_PERIOD)
+    i = len(df) - 1
+
+    if atr[i] is None:
+        return None, None, setup, bars_since_armed
+
+    if setup is not None:
+        bars_since_armed += 1
+        if bars_since_armed > Config.CONFIRM_WITHIN_BARS:
+            log(f"setup expired unconfirmed after {bars_since_armed} bars: "
+                f"{setup.side} — {'; '.join(setup.reasons)}")
+            setup = None
+
+    if setup is None:
+        candidate = arm_setup(df, rsi, i, oversold=Config.RSI_OVERSOLD,
+                              overbought=Config.RSI_OVERBOUGHT)
+        if candidate is None:
+            return None, None, None, 0
+        if Config.DIVERGENCE_ONLY and candidate.divergence is None:
+            return None, None, None, 0
+        log(f"setup armed: {candidate.side} — {'; '.join(candidate.reasons)}. "
+            f"Waiting up to {Config.CONFIRM_WITHIN_BARS} bars for confirmation.")
+        return None, None, candidate, 0
+
+    reasons = confirms(df, rsi, i, setup)
+    if reasons is None:
+        return None, None, setup, bars_since_armed
+
+    computed = levels_from_structure(
+        setup, df["close"].iloc[i], atr[i],
+        atr_buffer=Config.ATR_BUFFER, reward_multiple=Config.REWARD_MULTIPLE,
+    )
+    if computed is None:
+        log("confirmed but the structure gives no usable stop, skipping",
+            level="WARN")
+        return None, None, None, 0
+
+    stop, target, distance = computed
+    log(f"CONFIRMED {setup.side}: {'; '.join(reasons)} | stop {stop:.5g} "
+        f"target {target:.5g} (distance {distance:.5g}, "
+        f"{Config.REWARD_MULTIPLE:g}R)")
+    return setup.side, (stop, target), None, 0
+
+
 def handle_stop(signum, _frame):
     global RUNNING
     RUNNING = False
@@ -370,6 +441,8 @@ def run_bot():
     guard = DailyLossGuard(Config.MAX_DAILY_LOSS_PERCENT)
     interactive = sys.stdout.isatty()
     last_bar = None
+    setup = None          # confirmed strategy: the idea we are waiting on
+    bars_since_armed = 0
 
     while RUNNING:
         started = time.monotonic()
@@ -404,6 +477,12 @@ def run_bot():
                         f"{len(positions)} open"
                     )
 
+                    levels = None
+                    if Config.STRATEGY == "confirmed":
+                        action, levels, setup, bars_since_armed = evaluate_confirmed(
+                            df, setup, bars_since_armed
+                        )
+
                     if action and len(positions) >= Config.MAX_OPEN_POSITIONS:
                         log(
                             f"{action} signal ignored: already at "
@@ -416,7 +495,7 @@ def run_bot():
                         elif guard.check(account.equity):
                             log(f"[SIGNAL] {action} — RSI {previous_rsi:.2f} → "
                                 f"{current_rsi:.2f}")
-                            open_position(action)
+                            open_position(action, levels)
 
         except Exception as exc:  # noqa: BLE001 — one bad cycle must not stop the bot
             log(f"cycle failed ({type(exc).__name__}): {exc}", level="ERROR")

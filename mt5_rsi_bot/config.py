@@ -65,11 +65,23 @@ class Config:
     MAGIC_NUMBER = _int("MAGIC_NUMBER", 123456)
     DEVIATION = _int("DEVIATION", 20)
 
+    # -- strategy ----------------------------------------------------------
+    # "confirmed": arm on RSI divergence or an extreme, then wait for a candle
+    #   pattern AND a close beyond the previous bar before entering. Stops come
+    #   from swing structure, not a fixed percentage.
+    # "simple": the original RSI threshold cross with fixed-percent stops.
+    #   Backtested at profit factor 0.53 on BTC daily; kept for comparison.
+    STRATEGY = _str("STRATEGY", "confirmed").lower()
+    DIVERGENCE_ONLY = _bool("DIVERGENCE_ONLY", False)
+    CONFIRM_WITHIN_BARS = _int("CONFIRM_WITHIN_BARS", 5)
+    REWARD_MULTIPLE = _float("REWARD_MULTIPLE", 3.0)
+    ATR_BUFFER = _float("ATR_BUFFER", 0.5)
+
     # -- signal ------------------------------------------------------------
     RSI_PERIOD = _int("RSI_PERIOD", 14)
     RSI_OVERSOLD = _float("RSI_OVERSOLD", 30)
     RSI_OVERBOUGHT = _float("RSI_OVERBOUGHT", 70)
-    BAR_COUNT = _int("BAR_COUNT", 100)
+    BAR_COUNT = _int("BAR_COUNT", 300)
 
     # -- stops -------------------------------------------------------------
     # "percent" scales with the instrument's price and is the safe default.
@@ -134,6 +146,23 @@ class Config:
                 f"RSI({cls.RSI_PERIOD}); use at least {cls.RSI_PERIOD * 3}"
             )
 
+        if cls.STRATEGY not in {"confirmed", "simple"}:
+            raise ConfigError("STRATEGY must be 'confirmed' or 'simple'")
+
+        if cls.STRATEGY == "confirmed":
+            if cls.REWARD_MULTIPLE <= 0:
+                raise ConfigError("REWARD_MULTIPLE must be positive")
+            if cls.CONFIRM_WITHIN_BARS < 1:
+                raise ConfigError("CONFIRM_WITHIN_BARS must be at least 1")
+            if cls.ATR_BUFFER < 0:
+                raise ConfigError("ATR_BUFFER cannot be negative")
+            # Structure stops need room for swing detection and ATR warm-up.
+            if cls.BAR_COUNT < 120:
+                raise ConfigError(
+                    f"STRATEGY=confirmed needs BAR_COUNT of at least 120 for swing "
+                    f"and divergence lookback; got {cls.BAR_COUNT}"
+                )
+
         if cls.SL_MODE not in {"percent", "points"}:
             raise ConfigError("SL_MODE must be 'percent' or 'points'")
 
@@ -180,12 +209,15 @@ class Config:
 
     @classmethod
     def describe(cls):
-        if cls.SL_MODE == "percent":
+        if cls.STRATEGY == "confirmed":
+            stops = (f"stop from swing + {cls.ATR_BUFFER:g}xATR, "
+                     f"target {cls.REWARD_MULTIPLE:g}R")
+        elif cls.SL_MODE == "percent":
             stops = f"stop {cls.SL_PERCENT:g}%, target {cls.TP_PERCENT:g}%"
         else:
             stops = f"stop {cls.SL_PIPS} points, target {cls.TP_PIPS} points"
         return (
-            f"{cls.SYMBOL} {cls.TIMEFRAME} | "
+            f"[{cls.STRATEGY}] {cls.SYMBOL} {cls.TIMEFRAME} | "
             f"RSI({cls.RSI_PERIOD}) {cls.RSI_OVERSOLD:g}/{cls.RSI_OVERBOUGHT:g} | "
             f"{cls.LOT_SIZE} lots | {stops} | "
             f"daily loss limit {cls.MAX_DAILY_LOSS_PERCENT:g}%"

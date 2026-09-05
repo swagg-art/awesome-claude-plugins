@@ -25,6 +25,12 @@ import pandas as pd
 
 from config import Config
 from main import compute_rsi, detect_signal
+from strategy import (
+    arm_setup,
+    average_true_range,
+    confirms,
+    levels_from_structure,
+)
 
 ASSUMPTIONS = """
 How this backtest fills orders, and why each choice is the pessimistic one:
@@ -226,7 +232,134 @@ def run_backtest(
 
 def _run(df, spread, contract_size, point, starting_equity, apply_daily_limit,
          rsi_period):
+    """The plain strategy: RSI crossing back through a fixed threshold."""
+
     rsi = compute_rsi(df["close"], rsi_period).to_numpy()
+
+    def decide(i):
+        return detect_signal(rsi[i - 2], rsi[i - 1]) if i >= 2 else None
+
+    def levels(side, entry, _i):
+        stop, target, _ = Config.stop_levels(side, entry, point, 8)
+        return stop, target
+
+    return _simulate(df, decide, levels, spread, contract_size, starting_equity,
+                     apply_daily_limit)
+
+
+class ConfirmedStrategy:
+    """Divergence and candlestick confirmation, with structure-derived stops.
+
+    Stateful across bars, because that is what "wait for confirmation" means:
+    a setup is armed on one bar and either confirmed on a later one or allowed
+    to expire. Only data up to the current bar is ever read.
+    """
+
+    def __init__(self, df, rsi, atr, *, oversold, overbought, confirm_within=5,
+                 reward_multiple=2.0, atr_buffer=0.5, require_pattern=True,
+                 require_break=True, require_rsi_turn=True, divergence_only=False):
+        self.df, self.rsi, self.atr = df, rsi, atr
+        self.oversold, self.overbought = oversold, overbought
+        self.confirm_within = confirm_within
+        self.reward_multiple, self.atr_buffer = reward_multiple, atr_buffer
+        self.require_pattern = require_pattern
+        self.require_break = require_break
+        self.require_rsi_turn = require_rsi_turn
+        self.divergence_only = divergence_only
+
+        self.setup = None
+        self._fired = None
+        self.armed_count = 0
+        self.expired_count = 0
+        self.confirmed_count = 0
+        self.last_reasons = []
+
+    def decide(self, i):
+        """Called on bar i when flat. A fill, if any, happens at bar i's open.
+
+        The confirmation therefore has to have happened on bar i-1, whose close
+        is the last thing knowable before that open.
+        """
+        signal_bar = i - 1
+        if signal_bar < 3 or self.atr[signal_bar] is None:
+            return None
+
+        if self.setup is not None and self.setup.expired(signal_bar, self.confirm_within):
+            self.setup = None
+            self.expired_count += 1
+
+        if self.setup is None:
+            candidate = arm_setup(
+                self.df, self.rsi, signal_bar,
+                oversold=self.oversold, overbought=self.overbought,
+            )
+            if candidate is not None:
+                if self.divergence_only and candidate.divergence is None:
+                    return None
+                self.setup = candidate
+                self.armed_count += 1
+            return None
+
+        reasons = confirms(
+            self.df, self.rsi, signal_bar, self.setup,
+            require_pattern=self.require_pattern,
+            require_break=self.require_break,
+            require_rsi_turn=self.require_rsi_turn,
+        )
+        if reasons is None:
+            return None
+
+        self._fired = self.setup
+        self.last_reasons = self.setup.reasons + reasons
+        self.confirmed_count += 1
+        side = self.setup.side
+        self.setup = None
+        return side
+
+    def levels(self, side, entry, i):
+        atr_value = self.atr[i - 1] or self.atr[i]
+        computed = levels_from_structure(
+            self._fired, entry, atr_value,
+            atr_buffer=self.atr_buffer, reward_multiple=self.reward_multiple,
+        )
+        if computed is None:
+            return None
+        stop, target, _ = computed
+        return stop, target
+
+
+def run_confirmed_backtest(df, *, spread=0.0, contract_size=1.0,
+                           starting_equity=10_000.0, apply_daily_limit=True,
+                           rsi_period=None, oversold=None, overbought=None,
+                           **strategy_kwargs):
+    """Backtest the confirmed strategy. Returns (Result, ConfirmedStrategy)."""
+
+    rsi_period = rsi_period or Config.RSI_PERIOD
+    oversold = oversold if oversold is not None else Config.RSI_OVERSOLD
+    overbought = overbought if overbought is not None else Config.RSI_OVERBOUGHT
+
+    rsi = compute_rsi(df["close"], rsi_period).to_numpy()
+    atr = average_true_range(df, rsi_period)
+
+    strategy = ConfirmedStrategy(
+        df, rsi, atr, oversold=oversold, overbought=overbought, **strategy_kwargs
+    )
+    result = _simulate(df, strategy.decide, strategy.levels, spread, contract_size,
+                       starting_equity, apply_daily_limit)
+    return result, strategy
+
+
+def _simulate(df, decide, levels, spread, contract_size, starting_equity,
+              apply_daily_limit):
+    """Bar-by-bar fill engine, shared by both strategies.
+
+    `decide(i)` returns "BUY", "SELL" or None for a fill at bar i's open.
+    `levels(side, entry, i)` returns the stop and target for that fill.
+
+    Keeping this in one place means the fill mechanics verified in
+    test_backtest.py are the mechanics both strategies are measured with.
+    """
+
     opens = df["open"].to_numpy()
     highs = df["high"].to_numpy()
     lows = df["low"].to_numpy()
@@ -245,8 +378,7 @@ def _run(df, spread, contract_size, point, starting_equity, apply_daily_limit,
     for i in range(1, len(df)):
         # --- daily loss limit, replaying what the live bot does -----------
         if apply_daily_limit:
-            stamp = times[i]
-            today = str(stamp)[:10]
+            today = str(times[i])[:10]
             if today != day:
                 day, day_open_equity, halted = today, equity, False
             if not halted and day_open_equity > 0:
@@ -284,22 +416,19 @@ def _run(df, spread, contract_size, point, starting_equity, apply_daily_limit,
                 open_trade = None
 
         # --- look for an entry --------------------------------------------
-        # The signal is known at the close of bar i-1; the fill is bar i's open.
-        if open_trade is None and i >= 2 and i < len(df):
-            action = detect_signal(rsi[i - 2], rsi[i - 1])
+        if open_trade is None:
+            action = decide(i)
             if action:
                 if apply_daily_limit and halted:
                     result.blocked_by_daily_limit += 1
                 else:
                     # A long enters at the ask.
                     entry = opens[i] + spread if action == "BUY" else opens[i]
-                    stop, target, _ = Config.stop_levels(action, entry, point, 8)
-                    open_trade = Trade(
-                        side=action,
-                        entry_index=i,
-                        entry_time=times[i],
-                        entry_price=entry,
-                    )
+                    computed = levels(action, entry, i)
+                    if computed is not None:
+                        stop, target = computed
+                        open_trade = Trade(side=action, entry_index=i,
+                                           entry_time=times[i], entry_price=entry)
 
         result.equity.append(equity)
 
@@ -308,6 +437,7 @@ def _run(df, spread, contract_size, point, starting_equity, apply_daily_limit,
         (df["close"].iloc[-1] - df["open"].iloc[0]) * volume * contract_size
     )
     return result
+
 
 
 # ---------------------------------------------------------------------------
@@ -369,7 +499,12 @@ def print_report(stats, title="BACKTEST"):
     print("=" * 62)
     print(f" {title}")
     print("=" * 62)
-    print(f" {Config.describe()}")
+    if "confirmed" in title:
+        print(f" {Config.SYMBOL} {Config.TIMEFRAME} | RSI({Config.RSI_PERIOD}) "
+              f"{Config.RSI_OVERSOLD:g}/{Config.RSI_OVERBOUGHT:g} | {Config.LOT_SIZE} lots"
+              f" | stop from swing structure + ATR buffer")
+    else:
+        print(f" {Config.describe()}")
     print(f" {stats['bars']} bars, {stats['from']} → {stats['to']}")
     print("-" * 62)
     print(f" Trades                {stats['trades']}")
@@ -520,6 +655,18 @@ def main():
                         help="ignore MAX_DAILY_LOSS_PERCENT (measures the raw strategy)")
     parser.add_argument("--walk-forward", action="store_true",
                         help="tune on the first 70%%, report on the held-out 30%%")
+    parser.add_argument("--strategy", choices=("simple", "confirmed"),
+                        default="confirmed",
+                        help="simple: RSI threshold cross with fixed-percent stops. "
+                             "confirmed: divergence + candlestick confirmation with "
+                             "structure-derived stops (default)")
+    parser.add_argument("--divergence-only", action="store_true",
+                        help="confirmed strategy: ignore plain oversold/overbought, "
+                             "arm only on divergence")
+    parser.add_argument("--reward", type=float, default=2.0,
+                        help="target as a multiple of the stop distance")
+    parser.add_argument("--confirm-within", type=int, default=5,
+                        help="bars a setup waits for confirmation before expiring")
     parser.add_argument("--trades", action="store_true", help="list every trade")
     parser.add_argument("--explain", action="store_true", help="print the fill assumptions")
     args = parser.parse_args()
@@ -551,11 +698,26 @@ def main():
         walk_forward(df, spread, contract, point, args.equity)
         return 0
 
-    result = run_backtest(
-        df, spread=spread, contract_size=contract, point=point,
-        starting_equity=args.equity, apply_daily_limit=not args.no_daily_limit,
-    )
-    print_report(summarise(result, args.equity))
+    if args.strategy == "confirmed":
+        result, strategy = run_confirmed_backtest(
+            df, spread=spread, contract_size=contract,
+            starting_equity=args.equity, apply_daily_limit=not args.no_daily_limit,
+            reward_multiple=args.reward, confirm_within=args.confirm_within,
+            divergence_only=args.divergence_only,
+        )
+        print_report(summarise(result, args.equity), title="BACKTEST — confirmed")
+        print(f" Setups armed          {strategy.armed_count}")
+        print(f"   confirmed           {strategy.confirmed_count}")
+        print(f"   expired unfilled    {strategy.expired_count}")
+        if strategy.armed_count:
+            rate = 100 * strategy.confirmed_count / strategy.armed_count
+            print(f"   confirmation rate   {rate:.1f}%")
+    else:
+        result = run_backtest(
+            df, spread=spread, contract_size=contract, point=point,
+            starting_equity=args.equity, apply_daily_limit=not args.no_daily_limit,
+        )
+        print_report(summarise(result, args.equity), title="BACKTEST — simple")
 
     if args.trades:
         print(f"\n{'#':>4} {'side':<5} {'entry':>12} {'exit':>12} {'reason':<7} {'P/L':>10}")
