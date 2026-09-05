@@ -6,3 +6,8 @@ venv/
 __pycache__/
 *.py[cod]
 .ruff_cache/
+
+# Market data pulled for backtesting. Not committed: it is a vendor's data and
+# redistribution terms are theirs to set, not ours. See artifacts/BACKTEST-REPORT.md
+# for how to obtain it.
+data/
