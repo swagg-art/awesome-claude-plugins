@@ -234,12 +234,19 @@ def find_divergence(
     Only data up to `upto` is examined, so this cannot see forward.
     """
     start = max(0, upto - max_lookback)
-    series = lows[: upto + 1] if kind == "bullish" else highs[: upto + 1]
-    pivots = (
-        swing_lows(series, left, right) if kind == "bullish"
-        else swing_highs(series, left, right)
+    series = lows if kind == "bullish" else highs
+
+    # Only pivots at or after `start` are kept, so only that window needs
+    # scanning — plus `left + 1` bars of run-up, which is what the pivot test at
+    # `start` itself reads behind. Scanning from bar 0 made this O(n) per call
+    # and the whole backtest quadratic.
+    window_start = max(0, start - left - 1)
+    segment = series[window_start: upto + 1]
+    found = (
+        swing_lows(segment, left, right) if kind == "bullish"
+        else swing_highs(segment, left, right)
     )
-    pivots = [p for p in pivots if p >= start]
+    pivots = [window_start + p for p in found if window_start + p >= start]
     if len(pivots) < 2:
         return None
 
@@ -301,7 +308,7 @@ class Entry:
 
 
 def arm_setup(df, rsi, i, *, oversold, overbought, left=2, right=2,
-              max_lookback=60, rsi_zone=45.0):
+              max_lookback=60, rsi_zone=45.0, highs=None, lows=None):
     """Is there a reason to start watching for a reversal at bar i?
 
     Two triggers, and divergence is the stronger one:
@@ -313,7 +320,12 @@ def arm_setup(df, rsi, i, *, oversold, overbought, left=2, right=2,
     if pd.isna(rsi[i]):
         return None
 
-    highs, lows = df["high"].tolist(), df["low"].tolist()
+    # Callers in a loop should hoist these out and pass them in; rebuilding
+    # both columns once per bar is O(n) per call and quadratic overall.
+    if highs is None:
+        highs = df["high"].tolist()
+    if lows is None:
+        lows = df["low"].tolist()
     reasons = []
 
     div = find_divergence(highs, lows, rsi, i, kind="bullish",

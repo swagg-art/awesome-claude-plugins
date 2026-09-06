@@ -93,6 +93,20 @@ BINANCE_COLUMNS = [
 ]
 
 
+# HistData.com's MetaTrader export: headerless, date and time in separate
+# fields. Widely used for free FX history, so worth reading directly.
+HEADERLESS_LAYOUTS = {
+    7: ["date", "time", "open", "high", "low", "close", "volume"],
+    6: ["time", "open", "high", "low", "close", "volume"],
+    5: ["time", "open", "high", "low", "close"],
+}
+
+
+def _is_headerless(fields):
+    """A header row contains words. A data row is dates, times and numbers."""
+    return not any(any(char.isalpha() for char in field) for field in fields)
+
+
 def _looks_like_epoch(text):
     """A bare integer of 10, 13 or 16 digits is a timestamp, not a price."""
     text = text.strip().strip('"')
@@ -117,7 +131,7 @@ def _decimals(text):
     return len(text.split(".", 1)[1].rstrip("0"))
 
 
-def load_csv(path):
+def load_csv(path, resample=None):
     """Read OHLC from a CSV and describe what was found.
 
     Handles MetaTrader's own bar export (tab separated, angle-bracketed
@@ -136,17 +150,23 @@ def load_csv(path):
 
     delimiter = _detect_delimiter(lines[0])
 
-    # A headerless Binance kline dump starts straight in on data.
-    first_field = lines[0].split(delimiter)[0]
+    first_row = lines[0].split(delimiter)
+    first_field = first_row[0].strip()
+    width = len(first_row)
     epoch_unit = None
-    if _looks_like_epoch(first_field):
-        epoch_unit = _epoch_unit(first_field)
-        width = len(lines[0].split(delimiter))
-        names = BINANCE_COLUMNS[:width] if width <= len(BINANCE_COLUMNS) else None
+
+    if _is_headerless(first_row):
+        if _looks_like_epoch(first_field):
+            # Binance kline dump.
+            epoch_unit = _epoch_unit(first_field)
+            names = BINANCE_COLUMNS[:width] if width <= len(BINANCE_COLUMNS) else None
+        else:
+            # HistData-style: a real date in the first field.
+            names = HEADERLESS_LAYOUTS.get(width)
         if names is None:
             raise SystemExit(
-                f"{path} has no header and {width} columns, which does not match "
-                "a Binance kline dump. Add a header row: time,open,high,low,close"
+                f"{path} has no header row and {width} columns, which matches no "
+                "layout this reads. Add a header: time,open,high,low,close"
             )
         rows = list(csv.DictReader(lines, fieldnames=names, delimiter=delimiter))
     else:
@@ -239,6 +259,10 @@ def load_csv(path):
         warnings.append(f"{len(bad)} bar(s) have impossible OHLC and were dropped")
         df = df.drop(bad.index).reset_index(drop=True)
 
+    if resample:
+        df, resample_note = _resample(df, resample)
+        warnings.append(resample_note)
+
     gaps = df["time"].diff().dropna()
     interval = int(gaps.mode().iloc[0].total_seconds() // 60) if len(gaps) else 0
     timeframe = MINUTES_TO_TIMEFRAME.get(interval, f"~{interval}min")
@@ -271,6 +295,25 @@ def load_csv(path):
         "warnings": warnings,
     }
     return df, meta
+
+
+def _resample(df, rule):
+    """Aggregate to a longer bar. M1 history answering an M15 question.
+
+    `label="left"` stamps each bar with its opening time, which is what
+    MetaTrader does and what the rest of this code assumes. Periods with no
+    ticks — weekends, holidays — drop out rather than becoming flat bars.
+    """
+
+    before = len(df)
+    grouped = (
+        df.set_index("time")
+        .resample(rule, label="left", closed="left")
+        .agg({"open": "first", "high": "max", "low": "min", "close": "last"})
+        .dropna()
+        .reset_index()
+    )
+    return grouped, f"resampled {before:,} bars to {len(grouped):,} at {rule}"
 
 
 def describe_data(meta):
@@ -434,6 +477,9 @@ class ConfirmedStrategy:
                  require_break=True, require_rsi_turn=True, divergence_only=False,
                  trend=None, long_only=False):
         self.df, self.rsi, self.atr = df, rsi, atr
+        # Built once, not once per bar.
+        self._highs = df["high"].tolist()
+        self._lows = df["low"].tolist()
         self.oversold, self.overbought = oversold, overbought
         self.confirm_within = confirm_within
         self.reward_multiple, self.atr_buffer = reward_multiple, atr_buffer
@@ -471,6 +517,7 @@ class ConfirmedStrategy:
             candidate = arm_setup(
                 self.df, self.rsi, signal_bar,
                 oversold=self.oversold, overbought=self.overbought,
+                highs=self._highs, lows=self._lows,
             )
             if candidate is not None:
                 if self.divergence_only and candidate.divergence is None:
@@ -955,8 +1002,15 @@ def run_suite(df, meta, *, spread, contract_size, point, equity, out_path=None):
         print(f" Only {best[1]} trades — too few to conclude anything. Treat as")
         print(" a hint to gather more history, not a result.")
     else:
-        wf = next((r for r in wf_rows if r[0] in best[0] or best[0].startswith(r[0])), None)
-        if wf and wf[4].startswith("-"):
+        wf = next((r for r in wf_rows if r[0] == best[0]), None)
+        if wf is None:
+            # Claiming "positive in and out of sample" for a variant that was
+            # never split-tested is exactly the overclaim this tool exists to
+            # avoid. Say what is actually known.
+            print(" It was NOT walk-forward tested, so there is no out-of-sample")
+            print(" evidence for it. A full-sample winner with no split test is a")
+            print(" candidate, not a result.")
+        elif wf[4].startswith("-"):
             print(" But it lost money out of sample. That is the number to believe.")
         else:
             print(" Positive in and out of sample. Necessary, still not sufficient:")
@@ -1027,6 +1081,10 @@ def main():
                         help="bars a setup waits for confirmation before expiring")
     parser.add_argument("--trades", action="store_true", help="list every trade")
     parser.add_argument("--explain", action="store_true", help="print the fill assumptions")
+    parser.add_argument("--resample",
+                        help="aggregate to a longer bar before testing, e.g. "
+                             "15min or 1h. Use when the file is M1 but the "
+                             "strategy trades M15.")
     parser.add_argument("--suite", action="store_true",
                         help="run every strategy and filter on this data, plus a "
                              "70/30 walk forward, and summarise")
@@ -1047,7 +1105,7 @@ def main():
         if args.point == 0.0:
             point = mt5_point
     elif args.csv:
-        df, meta = load_csv(args.csv)
+        df, meta = load_csv(args.csv, resample=args.resample)
         describe_data(meta)
         # The file knows its own point size and, for MT5 exports, its own
         # average spread. Only fall back to guessing if it did not say.
