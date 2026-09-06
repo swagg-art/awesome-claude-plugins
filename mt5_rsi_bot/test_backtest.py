@@ -6,11 +6,15 @@ the backtester reports mean what the report says they mean.
     python test_backtest.py        # or: python -m unittest test_backtest
 """
 
+import os
+import shutil
+import tempfile
 import unittest
+from datetime import datetime, timedelta
 
 import pandas as pd
 
-from backtest import run_backtest
+from backtest import load_csv, run_backtest
 from config import Config
 
 
@@ -116,3 +120,97 @@ class GuardTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LoaderTests(unittest.TestCase):
+    """The loader meets whatever MetaTrader and spreadsheets produce."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.bars = []
+        price = 64000.0
+        start = datetime(2026, 1, 5)
+        for i in range(200):
+            o = price
+            c = o + (7 if i % 3 else -5)
+            price = c
+            self.bars.append((start + timedelta(minutes=15 * i), o, c + 20, o - 20, c))
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def write(self, name, text):
+        path = os.path.join(self.dir, name)
+        with open(path, "w") as fh:
+            fh.write(text)
+        return path
+
+    def mt5_export(self, reverse=False):
+        head = "<DATE>\t<TIME>\t<OPEN>\t<HIGH>\t<LOW>\t<CLOSE>\t<TICKVOL>\t<VOL>\t<SPREAD>\n"
+        rows = reversed(self.bars) if reverse else self.bars
+        body = "".join(
+            f"{d:%Y.%m.%d}\t{d:%H:%M:%S}\t{o:.2f}\t{h:.2f}\t{low:.2f}\t{c:.2f}\t100\t0\t30\n"
+            for d, o, h, low, c in rows
+        )
+        return self.write("export.csv", head + body)
+
+    def plain(self, rows=None, name="plain.csv"):
+        rows = rows if rows is not None else self.bars
+        body = "".join(
+            f"{d:%Y-%m-%d %H:%M:%S},{o:.2f},{h:.2f},{low:.2f},{c:.2f}\n"
+            for d, o, h, low, c in rows
+        )
+        return self.write(name, "time,open,high,low,close\n" + body)
+
+    def test_mt5_tab_export_is_understood(self):
+        df, meta = load_csv(self.mt5_export())
+        self.assertEqual(meta["bars"], 200)
+        self.assertEqual(meta["timeframe"], "M15")
+        self.assertEqual(meta["digits"], 2)
+        self.assertAlmostEqual(meta["point"], 0.01)
+        self.assertEqual(len(df), 200)
+
+    def test_spread_column_is_used(self):
+        _, meta = load_csv(self.mt5_export())
+        self.assertAlmostEqual(meta["mean_spread_points"], 30.0)
+        self.assertAlmostEqual(meta["mean_spread_price"], 0.30)
+
+    def test_a_newest_first_file_is_reversed_with_a_warning(self):
+        """Silently backtesting history backwards would report confident nonsense."""
+        forward, _ = load_csv(self.plain())
+        backward, meta = load_csv(self.mt5_export(reverse=True))
+        self.assertTrue(any("newest-first" in w for w in meta["warnings"]))
+        self.assertEqual(
+            list(backward["close"].round(2)), list(forward["close"].round(2))
+        )
+
+    def test_duplicate_timestamps_are_dropped(self):
+        rows = [*self.bars, self.bars[10]]
+        _, meta = load_csv(self.plain(rows, "dupes.csv"))
+        self.assertTrue(any("duplicate" in w for w in meta["warnings"]))
+        self.assertEqual(meta["bars"], 200)
+
+    def test_impossible_ohlc_is_dropped(self):
+        d, o, h, low, c = self.bars[50]
+        broken = [*self.bars[:50], (d, o, low, h, c), *self.bars[51:]]  # high < low
+        _, meta = load_csv(self.plain(broken, "broken.csv"))
+        self.assertTrue(any("impossible OHLC" in w for w in meta["warnings"]))
+
+    def test_a_missing_column_names_what_was_found(self):
+        path = self.write("bad.csv", "time,open,high\n2026-01-01,1,2\n")
+        with self.assertRaises(SystemExit) as ctx:
+            load_csv(path)
+        self.assertIn("LOW", str(ctx.exception))
+
+    def test_too_little_history_is_refused(self):
+        _, meta = load_csv(self.plain())
+        with self.assertRaises(SystemExit) as ctx:
+            load_csv(self.plain(self.bars[:10], "short.csv"))
+        self.assertIn("need at least", str(ctx.exception))
+        self.assertEqual(meta["bars"], 200)   # the full file still loads
+
+    def test_daily_bars_are_recognised_too(self):
+        daily = [(datetime(2026, 1, 1) + timedelta(days=i), 100.0, 101.0, 99.0, 100.5)
+                 for i in range(100)]
+        _, meta = load_csv(self.plain(daily, "daily.csv"))
+        self.assertEqual(meta["timeframe"], "D1")

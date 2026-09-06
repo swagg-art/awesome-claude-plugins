@@ -20,6 +20,7 @@ import argparse
 import csv
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pandas as pd
 
@@ -70,59 +71,176 @@ How this backtest fills orders, and why each choice is the pessimistic one:
 # ---------------------------------------------------------------------------
 
 
-def load_csv(path):
-    """Read OHLC from a CSV.
+MINUTES_TO_TIMEFRAME = {
+    1: "M1", 5: "M5", 15: "M15", 30: "M30", 60: "H1",
+    240: "H4", 1440: "D1", 10080: "W1",
+}
 
-    Accepts a plain time,open,high,low,close header and MetaTrader's own export
-    (tab separated, <DATE> <TIME> <OPEN> ... angle-bracketed headers).
+
+def _detect_delimiter(first_line):
+    for candidate in ("\t", ";", ","):
+        if candidate in first_line:
+            return candidate
+    return ","
+
+
+def _decimals(text):
+    """Decimal places in a printed price, which gives the symbol's digits."""
+    text = text.strip()
+    return len(text.split(".", 1)[1]) if "." in text else 0
+
+
+def load_csv(path):
+    """Read OHLC from a CSV and describe what was found.
+
+    Handles MetaTrader's own bar export (tab separated, angle-bracketed
+    <DATE> <TIME> <OPEN> ... headers, optional <SPREAD> in points) as well as a
+    plain time,open,high,low,close file.
+
+    Returns (df, meta). `meta` carries the detected timeframe, digits, point
+    size and average spread, so the caller does not have to be told things the
+    file already knows.
     """
 
     with open(path, newline="", encoding="utf-8-sig") as fh:
-        sample = fh.read(4096)
-        fh.seek(0)
-        delimiter = "\t" if "\t" in sample.splitlines()[0] else ","
-        rows = list(csv.DictReader(fh, delimiter=delimiter))
+        lines = fh.read().splitlines()
+    if len(lines) < 2:
+        raise SystemExit(f"{path} has no data rows")
 
+    delimiter = _detect_delimiter(lines[0])
+    rows = list(csv.DictReader(lines, delimiter=delimiter))
     if not rows:
         raise SystemExit(f"{path} has no data rows")
 
-    def pick(row, *names):
+    columns = {key.strip().strip("<>").upper(): key for key in rows[0] if key}
+
+    def column(*names):
         for name in names:
-            for key in row:
-                if key.strip().strip("<>").upper() == name:
-                    return row[key]
+            if name in columns:
+                return columns[name]
+        return None
+
+    date_col = column("DATE", "TIMESTAMP", "DATETIME", "TIME")
+    time_col = column("TIME") if date_col != columns.get("TIME") else None
+    price_cols = {name: column(name) for name in ("OPEN", "HIGH", "LOW", "CLOSE")}
+    spread_col = column("SPREAD")
+
+    missing = [name for name, col in price_cols.items() if col is None]
+    if date_col is None:
+        missing.append("DATE/TIME")
+    if missing:
         raise SystemExit(
-            f"{path} has no {names[0]} column. Found: {', '.join(rows[0].keys())}"
+            f"{path} is missing {', '.join(missing)}. Columns found: "
+            f"{', '.join(columns)}"
         )
 
-    records = []
+    records, spreads, digits, skipped = [], [], 0, 0
     for row in rows:
         try:
-            date = pick(row, "DATE", "TIME", "TIMESTAMP")
-            try:
-                clock = pick(row, "TIME")
-            except SystemExit:
-                clock = ""
-            stamp = f"{date} {clock}".strip() if clock and clock != date else date
-            records.append(
-                {
-                    "time": stamp,
-                    "open": float(pick(row, "OPEN")),
-                    "high": float(pick(row, "HIGH")),
-                    "low": float(pick(row, "LOW")),
-                    "close": float(pick(row, "CLOSE")),
-                }
-            )
-        except (ValueError, TypeError):
-            continue  # header repeats and blank lines
+            stamp = row[date_col].strip()
+            if time_col and row.get(time_col):
+                stamp = f"{stamp} {row[time_col].strip()}"
+            values = {name: row[col].strip() for name, col in price_cols.items()}
+            digits = max(digits, max(_decimals(v) for v in values.values()))
+            record = {name.lower(): float(v) for name, v in values.items()}
+            record["time"] = stamp
+            records.append(record)
+            if spread_col and row.get(spread_col):
+                spreads.append(float(row[spread_col]))
+        except (ValueError, TypeError, AttributeError, KeyError):
+            skipped += 1   # repeated headers, blank lines, footers
+
+    if not records:
+        raise SystemExit(f"{path} has no parsable rows")
 
     df = pd.DataFrame(records)
-    if len(df) < Config.RSI_PERIOD * 3:
+    df["time"] = pd.to_datetime(df["time"], errors="coerce", format="mixed")
+    unparsed = int(df["time"].isna().sum())
+    df = df.dropna(subset=["time"])
+
+    warnings = []
+    if skipped:
+        warnings.append(f"{skipped} unparsable row(s) skipped")
+    if unparsed:
+        warnings.append(f"{unparsed} row(s) had an unreadable timestamp")
+
+    # Order matters more than anything else here. A newest-first file — which
+    # some exports produce — would run the whole backtest backwards through
+    # history and report confident nonsense.
+    if not df["time"].is_monotonic_increasing:
+        if df["time"].is_monotonic_decreasing:
+            warnings.append("file was newest-first; reversed to oldest-first")
+        else:
+            warnings.append("timestamps were out of order; sorted")
+        df = df.sort_values("time")
+
+    before = len(df)
+    df = df.drop_duplicates(subset="time", keep="first").reset_index(drop=True)
+    if len(df) < before:
+        warnings.append(f"{before - len(df)} duplicate timestamp(s) dropped")
+
+    bad = df[(df["high"] < df["low"])
+             | (df["high"] < df[["open", "close"]].max(axis=1))
+             | (df["low"] > df[["open", "close"]].min(axis=1))]
+    if len(bad):
+        warnings.append(f"{len(bad)} bar(s) have impossible OHLC and were dropped")
+        df = df.drop(bad.index).reset_index(drop=True)
+
+    gaps = df["time"].diff().dropna()
+    interval = int(gaps.mode().iloc[0].total_seconds() // 60) if len(gaps) else 0
+    timeframe = MINUTES_TO_TIMEFRAME.get(interval, f"~{interval}min")
+    long_gaps = int((gaps > gaps.mode().iloc[0] * 3).sum()) if len(gaps) else 0
+
+    point = 10.0 ** -digits if digits else 0.0
+    mean_spread_points = (sum(spreads) / len(spreads)) if spreads else None
+
+    warmup = max(Config.RSI_PERIOD, Config.EMA_TREND_PERIOD) * 3
+    if len(df) < warmup:
         raise SystemExit(
-            f"only {len(df)} usable bars in {path}; need at least "
-            f"{Config.RSI_PERIOD * 3} for RSI({Config.RSI_PERIOD})"
+            f"only {len(df)} usable bars in {path}; need at least {warmup} "
+            f"for RSI({Config.RSI_PERIOD})"
         )
-    return df
+
+    meta = {
+        "path": path,
+        "bars": len(df),
+        "first": df["time"].iloc[0],
+        "last": df["time"].iloc[-1],
+        "interval_minutes": interval,
+        "timeframe": timeframe,
+        "digits": digits,
+        "point": point,
+        "mean_spread_points": mean_spread_points,
+        "mean_spread_price": (mean_spread_points * point) if mean_spread_points else None,
+        "long_gaps": long_gaps,
+        "warnings": warnings,
+    }
+    return df, meta
+
+
+def describe_data(meta):
+    """Print what the file turned out to be, before any results are shown."""
+
+    print(f"\nData: {meta['path']}")
+    print(f"  {meta['bars']} bars, {meta['first']} -> {meta['last']}")
+    print(f"  bar interval {meta['interval_minutes']} min, so timeframe {meta['timeframe']}")
+    print(f"  prices carry {meta['digits']} decimals, so point = {meta['point']}")
+
+    if meta["mean_spread_price"] is not None:
+        print(f"  average recorded spread {meta['mean_spread_points']:.1f} points "
+              f"= {meta['mean_spread_price']:.{meta['digits']}f}")
+
+    if meta["timeframe"] != Config.TIMEFRAME:
+        print(f"  NOTE: this file is {meta['timeframe']} but MT5_TIMEFRAME is "
+              f"{Config.TIMEFRAME}. The backtest uses the file.")
+
+    if meta["long_gaps"]:
+        print(f"  {meta['long_gaps']} gap(s) longer than 3 bars — normal for FX "
+              f"weekends, worth a look otherwise")
+
+    for warning in meta["warnings"]:
+        print(f"  WARNING: {warning}")
+    print()
 
 
 def load_mt5(bars):
@@ -658,6 +776,171 @@ def walk_forward(df, spread, contract, point, starting_equity):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Suite
+# ---------------------------------------------------------------------------
+
+
+def _row(label, stats, extra=""):
+    pf = f"{stats['profit_factor']:.3f}" if stats["profit_factor"] else "n/a"
+    wr = f"{stats['win_rate_pct']:.1f}" if stats["win_rate_pct"] is not None else "n/a"
+    return (label, stats["trades"], wr, pf, stats["net_pnl"],
+            stats["max_drawdown_pct"], extra)
+
+
+def _table(rows, headers):
+    widths = [max(len(str(r[i])) for r in [headers, *rows]) for i in range(len(headers))]
+    lines = ["  ".join(str(h).ljust(w) for h, w in zip(headers, widths, strict=True))]
+    lines.append("  ".join("-" * w for w in widths))
+    for row in rows:
+        lines.append("  ".join(str(c).ljust(w) for c, w in zip(row, widths, strict=True)))
+    return "\n".join(lines)
+
+
+def _markdown(rows, headers):
+    out = ["| " + " | ".join(headers) + " |",
+           "|" + "|".join("---" for _ in headers) + "|"]
+    for row in rows:
+        out.append("| " + " | ".join(str(c) for c in row) + " |")
+    return "\n".join(out)
+
+
+def run_suite(df, meta, *, spread, contract_size, point, equity, out_path=None):
+    """Everything worth knowing about one data file, in one command.
+
+    Runs the strategies that exist, the direction filters, and a 70/30
+    walk-forward, then says what it thinks. Written so that dropping a fresh
+    export in and running it needs no further decisions.
+    """
+
+    split = int(len(df) * 0.7)
+    in_sample = df.iloc[:split].reset_index(drop=True)
+    out_sample = df.iloc[split:].reset_index(drop=True)
+
+    common = dict(spread=spread, contract_size=contract_size,
+                  starting_equity=equity, apply_daily_limit=True)
+
+    def confirmed(data, divergence_only=None, **kw):
+        result, strategy = run_confirmed_backtest(
+            data,
+            divergence_only=(Config.DIVERGENCE_ONLY if divergence_only is None
+                             else divergence_only),
+            reward_multiple=Config.REWARD_MULTIPLE,
+            confirm_within=Config.CONFIRM_WITHIN_BARS,
+            atr_buffer=Config.ATR_BUFFER, **common, **kw,
+        )
+        return summarise(result, equity), strategy
+
+    def simple(data):
+        return summarise(
+            run_backtest(data, point=point, **common), equity
+        )
+
+    headers = ["strategy", "trades", "win%", "PF", "net", "maxDD%", "note"]
+    rows = []
+
+    simple_stats = simple(df)
+    rows.append(_row("simple (threshold, fixed stops)", simple_stats,
+                     "the original"))
+
+    base_stats, base_strategy = confirmed(df)
+    rows.append(_row("confirmed (config default)", base_stats,
+                     f"{base_strategy.armed_count} setups armed"))
+
+    # Arming only on divergence is stricter: fewer setups, better ones on the
+    # data measured so far. Shown alongside the default because the two differ
+    # and the difference should never be invisible.
+    div_stats, div_strategy = confirmed(df, divergence_only=True)
+    rows.append(_row("confirmed, divergence-only arming", div_stats,
+                     f"{div_strategy.armed_count} setups armed"))
+
+    for period in (50, 100, 200):
+        stats, strategy = confirmed(df, ema_period=period)
+        rows.append(_row(f"confirmed + EMA {period}", stats,
+                         f"{strategy.filtered_count} filtered out"))
+
+    stats, strategy = confirmed(df, long_only=True)
+    rows.append(_row("confirmed, long only", stats,
+                     f"{strategy.filtered_count} filtered out"))
+
+    # Round the money columns only at the point of display.
+    display = [(r[0], r[1], r[2], r[3], f"{r[4]:+.2f}", f"{r[5]:.2f}", r[6])
+               for r in rows]
+
+    wf_headers = ["variant", "in trades", "in net", "out trades", "out net"]
+    wf_rows = []
+    for label, kw in (("confirmed (config default)", {}),
+                      ("confirmed, divergence-only", {"divergence_only": True}),
+                      ("confirmed + EMA 100", {"ema_period": 100}),
+                      ("confirmed, long only", {"long_only": True}),
+                      ("simple", None)):
+        if kw is None:
+            si, so = simple(in_sample), simple(out_sample)
+        else:
+            si, _ = confirmed(in_sample, **kw)
+            so, _ = confirmed(out_sample, **kw)
+        wf_rows.append((label, si["trades"], f"{si['net_pnl']:+.2f}",
+                        so["trades"], f"{so['net_pnl']:+.2f}"))
+
+    title = f"{Config.SYMBOL} {meta['timeframe']} — {meta['bars']} bars"
+    print("\n" + "=" * 72)
+    print(f" SUITE: {title}")
+    print("=" * 72)
+    print(_table(display, headers))
+    print()
+    print(f" Walk forward, split 70/30 at bar {split} (no tuning, same settings):")
+    print(_table(wf_rows, wf_headers))
+    print()
+
+    best = max(rows, key=lambda r: r[4])
+    print(f" Best on this data: {best[0]} at {best[4]:+.2f}")
+    if best[4] <= 0:
+        print(" Nothing here made money. Do not trade this configuration.")
+    elif best[1] < 30:
+        print(f" Only {best[1]} trades — too few to conclude anything. Treat as")
+        print(" a hint to gather more history, not a result.")
+    else:
+        wf = next((r for r in wf_rows if r[0] in best[0] or best[0].startswith(r[0])), None)
+        if wf and wf[4].startswith("-"):
+            print(" But it lost money out of sample. That is the number to believe.")
+        else:
+            print(" Positive in and out of sample. Necessary, still not sufficient:")
+            print(" one symbol, one period, costs modelled optimistically.")
+    print("=" * 72)
+
+    if out_path:
+        lines = [
+            f"# Backtest suite — {title}",
+            "",
+            f"**Data:** `{meta['path']}`  ",
+            f"**Bars:** {meta['bars']}, {meta['first']} → {meta['last']}  ",
+            f"**Timeframe detected:** {meta['timeframe']}  ",
+            f"**Spread used:** {spread:.{meta['digits']}f}"
+            + (" (from the file's own SPREAD column)"
+               if meta["mean_spread_price"] else " (supplied)"),
+            f"**Contract size:** {contract_size}  ",
+            f"**Starting equity:** {equity:,.2f}",
+            "",
+        ]
+        if meta["warnings"]:
+            lines += ["## Data warnings", ""]
+            lines += [f"- {w}" for w in meta["warnings"]] + [""]
+        lines += ["## Full sample", "", _markdown(display, headers), "",
+                  f"## Walk forward (70/30 at bar {split})", "",
+                  _markdown(wf_rows, wf_headers), "",
+                  "## Reading this", "",
+                  "The out-of-sample column is the one that matters. A variant that",
+                  "wins in sample and loses out of sample is fitted to the past.",
+                  "",
+                  "Fill assumptions (all pessimistic where there was a choice) are",
+                  "printed by `python backtest.py --explain`.", ""]
+        Path(out_path).write_text("\n".join(lines))
+        print(f"\nWritten to {out_path}")
+
+    return rows
+
+
+
 def main():
     parser = argparse.ArgumentParser(description="Backtest the RSI strategy.")
     source = parser.add_mutually_exclusive_group()
@@ -689,6 +972,10 @@ def main():
                         help="bars a setup waits for confirmation before expiring")
     parser.add_argument("--trades", action="store_true", help="list every trade")
     parser.add_argument("--explain", action="store_true", help="print the fill assumptions")
+    parser.add_argument("--suite", action="store_true",
+                        help="run every strategy and filter on this data, plus a "
+                             "70/30 walk forward, and summarise")
+    parser.add_argument("--out", help="write the suite result to this markdown file")
     args = parser.parse_args()
 
     if args.explain:
@@ -705,7 +992,14 @@ def main():
         if args.point == 0.0:
             point = mt5_point
     elif args.csv:
-        df = load_csv(args.csv)
+        df, meta = load_csv(args.csv)
+        describe_data(meta)
+        # The file knows its own point size and, for MT5 exports, its own
+        # average spread. Only fall back to guessing if it did not say.
+        if args.point == 0.0:
+            point = meta["point"]
+        if args.spread is None and meta["mean_spread_price"]:
+            spread = meta["mean_spread_price"]
     else:
         parser.error("give --csv PATH or --mt5 (or --explain)")
 
@@ -713,6 +1007,15 @@ def main():
         print("NOTE: spread is 0, so these results are better than anything you\n"
               "      could trade. Pass --spread with your broker's real spread.",
               file=sys.stderr)
+
+    if args.suite:
+        run_suite(df, meta if args.csv else {
+            "path": f"MT5 {Config.SYMBOL}", "bars": len(df), "timeframe": Config.TIMEFRAME,
+            "first": df["time"].iloc[0], "last": df["time"].iloc[-1],
+            "digits": 5, "mean_spread_price": spread or None, "warnings": [],
+        }, spread=spread, contract_size=contract, point=point,
+            equity=args.equity, out_path=args.out)
+        return 0
 
     if args.walk_forward:
         walk_forward(df, spread, contract, point, args.equity)
