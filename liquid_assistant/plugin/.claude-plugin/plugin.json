@@ -1,0 +1,18 @@
+{
+  "name": "liquid-assistant",
+  "description": "Human-in-the-loop trading assistant for Liquid perpetuals: risk-based position sizing, leverage chosen to keep liquidation beyond the stop, funding cost estimates, and portfolio risk review. Proposes trades for confirmation; never executes.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Liquid Assistant"
+  },
+  "license": "MIT",
+  "keywords": [
+    "trading",
+    "perpetuals",
+    "risk-management",
+    "position-sizing",
+    "liquidation",
+    "funding-rate",
+    "liquid"
+  ]
+}
