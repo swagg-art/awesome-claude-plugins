@@ -84,10 +84,37 @@ def _detect_delimiter(first_line):
     return ","
 
 
+# Binance's public kline dumps (data.binance.vision) are headerless, with an
+# epoch open_time first. Downloadable in a browser with no account, so they are
+# the most obtainable intraday history there is — worth reading directly.
+BINANCE_COLUMNS = [
+    "open_time", "open", "high", "low", "close", "volume", "close_time",
+    "quote_volume", "trades", "taker_base", "taker_quote", "ignore",
+]
+
+
+def _looks_like_epoch(text):
+    """A bare integer of 10, 13 or 16 digits is a timestamp, not a price."""
+    text = text.strip().strip('"')
+    return text.isdigit() and len(text) in (10, 13, 16)
+
+
+def _epoch_unit(text):
+    return {10: "s", 13: "ms", 16: "us"}[len(text.strip().strip('"'))]
+
+
 def _decimals(text):
-    """Decimal places in a printed price, which gives the symbol's digits."""
-    text = text.strip()
-    return len(text.split(".", 1)[1]) if "." in text else 0
+    """Meaningful decimal places in a printed price, which gives the tick size.
+
+    Trailing zeros are stripped first: exchanges pad to a fixed width, so
+    Binance writes BTC as 93576.00000000. Counting those literally would say
+    the tick is 0.00000001 rather than 0.01, and any points-mode stop computed
+    from it would be a million times too small.
+    """
+    text = text.strip().strip('"')
+    if "." not in text:
+        return 0
+    return len(text.split(".", 1)[1].rstrip("0"))
 
 
 def load_csv(path):
@@ -108,11 +135,32 @@ def load_csv(path):
         raise SystemExit(f"{path} has no data rows")
 
     delimiter = _detect_delimiter(lines[0])
-    rows = list(csv.DictReader(lines, delimiter=delimiter))
+
+    # A headerless Binance kline dump starts straight in on data.
+    first_field = lines[0].split(delimiter)[0]
+    epoch_unit = None
+    if _looks_like_epoch(first_field):
+        epoch_unit = _epoch_unit(first_field)
+        width = len(lines[0].split(delimiter))
+        names = BINANCE_COLUMNS[:width] if width <= len(BINANCE_COLUMNS) else None
+        if names is None:
+            raise SystemExit(
+                f"{path} has no header and {width} columns, which does not match "
+                "a Binance kline dump. Add a header row: time,open,high,low,close"
+            )
+        rows = list(csv.DictReader(lines, fieldnames=names, delimiter=delimiter))
+    else:
+        rows = list(csv.DictReader(lines, delimiter=delimiter))
+
     if not rows:
         raise SystemExit(f"{path} has no data rows")
 
     columns = {key.strip().strip("<>").upper(): key for key in rows[0] if key}
+    if epoch_unit is None and "OPEN_TIME" in columns:
+        # Binance also publishes the same data with a header on some files.
+        sample = rows[0][columns["OPEN_TIME"]]
+        if _looks_like_epoch(sample):
+            epoch_unit = _epoch_unit(sample)
 
     def column(*names):
         for name in names:
@@ -120,7 +168,7 @@ def load_csv(path):
                 return columns[name]
         return None
 
-    date_col = column("DATE", "TIMESTAMP", "DATETIME", "TIME")
+    date_col = column("OPEN_TIME", "DATE", "TIMESTAMP", "DATETIME", "TIME")
     time_col = column("TIME") if date_col != columns.get("TIME") else None
     price_cols = {name: column(name) for name in ("OPEN", "HIGH", "LOW", "CLOSE")}
     spread_col = column("SPREAD")
@@ -154,7 +202,12 @@ def load_csv(path):
         raise SystemExit(f"{path} has no parsable rows")
 
     df = pd.DataFrame(records)
-    df["time"] = pd.to_datetime(df["time"], errors="coerce", format="mixed")
+    if epoch_unit:
+        df["time"] = pd.to_datetime(
+            pd.to_numeric(df["time"], errors="coerce"), unit=epoch_unit, errors="coerce"
+        )
+    else:
+        df["time"] = pd.to_datetime(df["time"], errors="coerce", format="mixed")
     unparsed = int(df["time"].isna().sum())
     df = df.dropna(subset=["time"])
 
@@ -191,7 +244,9 @@ def load_csv(path):
     timeframe = MINUTES_TO_TIMEFRAME.get(interval, f"~{interval}min")
     long_gaps = int((gaps > gaps.mode().iloc[0] * 3).sum()) if len(gaps) else 0
 
-    point = 10.0 ** -digits if digits else 0.0
+    # digits == 0 means whole-unit quotes, so point is 1 — never 0, which
+    # would silently zero any spread derived from it.
+    point = 10.0 ** -digits
     mean_spread_points = (sum(spreads) / len(spreads)) if spreads else None
 
     warmup = max(Config.RSI_PERIOD, Config.EMA_TREND_PERIOD) * 3

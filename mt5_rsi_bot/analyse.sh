@@ -38,6 +38,32 @@ Exporting bars from MetaTrader 5
 
   4. Run:  ./analyse.sh path/to/that/file.csv
 
+Free BTC 15-minute history, no account, no terminal
+---------------------------------------------------
+
+  Binance publishes its own bars as monthly ZIPs. Download in a browser:
+
+    https://data.binance.vision/?prefix=data/spot/monthly/klines/BTCUSDT/15m/
+
+  Or directly, one month per file:
+
+    https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/15m/BTCUSDT-15m-2025-01.zip
+
+  Change the date for each month you want. A year is 12 files, about 35,000
+  bars. Unzip them and either run one at a time, or concatenate first:
+
+    cat BTCUSDT-15m-*.csv > btc_m15.csv
+    ./analyse.sh btc_m15.csv --contract-size 1
+
+  These files are headerless with epoch timestamps; the loader reads them as
+  they are, no editing needed. Concatenate in date order — though if you get it
+  wrong the loader sorts and says so.
+
+  Caveat worth keeping in mind: this is Binance spot BTCUSDT, not your broker's
+  BTCUSD CFD. Prices track closely, but the spread and financing are different,
+  so it tests the strategy rather than your account. Pass --spread with your
+  broker's typical spread to make the costs realistic.
+
 How many bars do you need?
 --------------------------
   Enough for the result to mean something. Under 30 trades the tool will say

@@ -132,9 +132,12 @@ class LoaderTests(unittest.TestCase):
         start = datetime(2026, 1, 5)
         for i in range(200):
             o = price
-            c = o + (7 if i % 3 else -5)
+            c = round(o + (7.31 if i % 3 else -5.17), 2)
             price = c
-            self.bars.append((start + timedelta(minutes=15 * i), o, c + 20, o - 20, c))
+            self.bars.append(
+                (start + timedelta(minutes=15 * i), o, round(c + 20.5, 2),
+                 round(o - 20.5, 2), c)
+            )
 
     def tearDown(self):
         shutil.rmtree(self.dir, ignore_errors=True)
@@ -214,3 +217,78 @@ class LoaderTests(unittest.TestCase):
                  for i in range(100)]
         _, meta = load_csv(self.plain(daily, "daily.csv"))
         self.assertEqual(meta["timeframe"], "D1")
+
+
+class BinanceKlineTests(unittest.TestCase):
+    """Binance's public dumps are headerless with epoch timestamps.
+
+    They are the most obtainable intraday history there is — a browser download
+    with no account — so the loader reads them directly.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.rows = []
+        price, start = 94000.0, 1735689600000  # 2025-01-01T00:00:00Z in ms
+        for i in range(200):
+            o = round(price, 2)
+            c = round(o + (13.5 if i % 3 else -9.25), 2)
+            price = c
+            open_ms = start + i * 900_000
+            # Prices padded to 8 decimals, exactly as Binance writes them.
+            self.rows.append(
+                f"{open_ms},{o:.8f},{c + 20:.8f},{o - 20:.8f},{c:.8f},"
+                f"12.34000000,{open_ms + 899_999},1155000.0,1234,6.1,570000.0,0"
+            )
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def write(self, name, text):
+        path = os.path.join(self.dir, name)
+        with open(path, "w") as fh:
+            fh.write(text)
+        return path
+
+    def test_headerless_millisecond_dump_loads(self):
+        df, meta = load_csv(self.write("ms.csv", "\n".join(self.rows) + "\n"))
+        self.assertEqual(meta["bars"], 200)
+        self.assertEqual(meta["timeframe"], "M15")
+        self.assertEqual(str(df["time"].iloc[0]), "2025-01-01 00:00:00")
+
+    def test_microsecond_timestamps_are_handled(self):
+        """Binance moved some 2025 files to microseconds."""
+        micro = [
+            ",".join([str(int(f.split(",")[0]) * 1000), *f.split(",")[1:]])
+            for f in self.rows
+        ]
+        _, meta = load_csv(self.write("us.csv", "\n".join(micro) + "\n"))
+        self.assertEqual(meta["timeframe"], "M15")
+        self.assertEqual(meta["bars"], 200)
+
+    def test_the_headered_variant_loads_the_same(self):
+        header = ("open_time,open,high,low,close,volume,close_time,quote_volume,"
+                  "trades,taker_base,taker_quote,ignore\n")
+        with_header, _ = load_csv(self.write("h.csv", header + "\n".join(self.rows) + "\n"))
+        without, _ = load_csv(self.write("n.csv", "\n".join(self.rows) + "\n"))
+        self.assertEqual(list(with_header["close"]), list(without["close"]))
+
+    def test_padding_zeros_do_not_fake_the_tick_size(self):
+        """94000.00000000 is a 2-decimal price, not an 8-decimal one.
+
+        Reading it literally would make a points-mode stop a million times too
+        small.
+        """
+        _, meta = load_csv(self.write("p.csv", "\n".join(self.rows) + "\n"))
+        self.assertEqual(meta["digits"], 2)
+        self.assertAlmostEqual(meta["point"], 0.01)
+
+    def test_whole_unit_quotes_give_a_point_of_one_not_zero(self):
+        rows = "".join(
+            f"2026-01-01 {i // 4:02d}:{15 * (i % 4):02d}:00,{5000 + i},"
+            f"{5010 + i},{4990 + i},{5005 + i}\n"
+            for i in range(96)
+        )
+        _, meta = load_csv(self.write("w.csv", "time,open,high,low,close\n" + rows))
+        self.assertEqual(meta["digits"], 0)
+        self.assertEqual(meta["point"], 1.0)

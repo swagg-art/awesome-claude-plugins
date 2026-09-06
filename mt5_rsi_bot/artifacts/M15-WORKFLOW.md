@@ -22,6 +22,40 @@ changed here, because flipping a trading default is your call, not a side effect
 of adding a tool. The suite now prints both rows every run, so the two can never
 diverge silently again.
 
+## Where to get M15 data
+
+Two sources. The second needs nothing installed.
+
+### Binance public dumps — free, no account, no terminal
+
+Binance publishes its own bars as monthly ZIP files, downloadable in a browser:
+
+    https://data.binance.vision/?prefix=data/spot/monthly/klines/BTCUSDT/15m/
+
+One file per month, roughly 2,900 bars each. A year is 12 files and about
+35,000 bars — an order of magnitude more evidence than the 3,170 daily bars
+everything so far rests on.
+
+```
+unzip 'BTCUSDT-15m-*.zip'
+cat BTCUSDT-15m-*.csv > btc_m15.csv
+./analyse.sh btc_m15.csv --spread 40
+```
+
+The files are headerless with epoch timestamps (milliseconds on older ones,
+microseconds on some 2025 files). The loader reads all of those variants as
+they are — no editing, no header to add.
+
+**The caveat:** this is Binance spot BTCUSDT, not your broker's BTCUSD CFD.
+Prices track closely, but spread and financing differ, so it tests *the
+strategy* rather than *your account*. Pass `--spread` with your broker's typical
+spread so the costs are at least realistic.
+
+### Your broker's own export
+
+See below. More accurate to what you would actually trade, but it needs MT5
+installed and the history downloaded into the terminal first.
+
 ## Running it
 
 ```
