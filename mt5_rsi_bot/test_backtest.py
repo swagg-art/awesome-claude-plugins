@@ -292,3 +292,92 @@ class BinanceKlineTests(unittest.TestCase):
         _, meta = load_csv(self.write("w.csv", "time,open,high,low,close\n" + rows))
         self.assertEqual(meta["digits"], 0)
         self.assertEqual(meta["point"], 1.0)
+
+
+class LimitEntryTests(unittest.TestCase):
+    """Resting-order fills, every expectation computed by hand.
+
+    A limit order does not escape the spread — with a retail FX broker a buy
+    limit is a level on the ask. It buys a better entry level and risks not
+    filling at all. These check both halves of that.
+    """
+
+    def setUp(self):
+        Config.SL_MODE, Config.SL_PERCENT, Config.TP_PERCENT = "percent", 1.0, 2.0
+        Config.LOT_SIZE, Config.RSI_PERIOD = 1.0, 14
+        Config.RSI_OVERSOLD, Config.RSI_OVERBOUGHT = 30, 70
+
+    def run_limit(self, tail, **kwargs):
+        kwargs.setdefault("spread", 0.0)
+        kwargs.setdefault("contract_size", 1.0)
+        kwargs.setdefault("apply_daily_limit", False)
+        kwargs.setdefault("entry_mode", "limit")
+        kwargs.setdefault("limit_offset_atr", 0.5)
+        return run_backtest(series(tail), **kwargs)
+
+    def test_an_order_price_never_reaches_expires_unfilled(self):
+        """The whole point: some trades simply do not happen."""
+        # Entry bar opens at 700 and only ever rises, so a buy limit below
+        # never fills.
+        tail = [bar(f"{h:02d}:00", 700 + h, 720 + h, 699 + h, 715 + h)
+                for h in range(1, 8)]
+        result = self.run_limit(tail)
+        self.assertEqual(result.trades, [])
+        self.assertEqual(result.limits_placed, 1)
+        self.assertEqual(result.limits_filled, 0)
+        self.assertEqual(result.limits_expired, 1)
+
+    def test_price_trading_through_the_level_fills_at_the_level(self):
+        tail = [bar("01:00", 700, 701, 600, 650),
+                bar("02:00", 650, 900, 649, 890)]   # runs to the target
+        result = self.run_limit(tail)
+        self.assertEqual(len(result.trades), 1)
+        trade = result.trades[0]
+        self.assertEqual(result.limits_filled, 1)
+        # Entry is better than the 700 a market order would have paid.
+        self.assertLess(trade.entry_price, 700.0)
+
+    def test_merely_touching_the_level_does_not_fill(self):
+        """Queue position is real. A level touched once may not fill you."""
+        # Find where the limit lands. The second bar exists only to close the
+        # position, since trades are recorded on exit.
+        probe = self.run_limit([bar("01:00", 700, 701, 600, 650),
+                                bar("02:00", 650, 900, 649, 890)])
+        self.assertEqual(len(probe.trades), 1, "probe should have filled")
+        # No rounding: rounded down by even a fraction it sits *below* the
+        # level and legitimately fills.
+        exact = probe.trades[0].entry_price
+        tail = [bar("01:00", 700, 701, exact, 700),   # low == limit exactly
+                bar("02:00", 700, 701, exact, 700),
+                bar("03:00", 700, 701, exact, 700),
+                bar("04:00", 700, 701, exact, 700),
+                bar("05:00", 700, 701, exact, 700)]
+        result = self.run_limit(tail)
+        self.assertEqual(result.trades, [], "a touch should not be treated as a fill")
+        self.assertEqual(result.limits_expired, 1)
+
+    def test_a_gap_through_the_limit_fills_at_the_better_open(self):
+        """Price gapping past your limit fills you better. That is real."""
+        tail = [bar("01:00", 480, 485, 475, 480),   # gaps well past the limit
+                bar("02:00", 480, 900, 479, 890)]   # then runs to the target
+        result = self.run_limit(tail)
+        self.assertEqual(len(result.trades), 1)
+        # Filled at the open, which is better than the resting level.
+        self.assertAlmostEqual(result.trades[0].entry_price, 480.0)
+
+    def test_the_expiry_window_is_respected(self):
+        flat = [bar(f"{h:02d}:00", 700, 701, 699, 700) for h in range(1, 10)]
+        dip = [bar("10:00", 700, 701, 600, 650),
+               bar("11:00", 650, 900, 649, 890)]   # fills, then closes
+        short_window = self.run_limit(flat + dip, limit_expiry_bars=2)
+        long_window = self.run_limit(flat + dip, limit_expiry_bars=20)
+        self.assertEqual(short_window.trades, [])
+        self.assertEqual(len(long_window.trades), 1)
+
+    def test_market_mode_is_unchanged_by_any_of_this(self):
+        tail = [QUIET, bar("02:00", 700, 720, 699, 715)]
+        market = run_backtest(series(tail), spread=0.0, contract_size=1.0,
+                              apply_daily_limit=False)
+        self.assertEqual(len(market.trades), 1)
+        self.assertAlmostEqual(market.trades[0].entry_price, 700.0)
+        self.assertEqual(market.limits_placed, 0)

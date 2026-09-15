@@ -405,6 +405,9 @@ class Result:
     bars: int = 0
     bars_in_market: int = 0
     blocked_by_daily_limit: int = 0
+    limits_placed: int = 0
+    limits_filled: int = 0
+    limits_expired: int = 0
     first_time: object = None
     last_time: object = None
     buy_hold_pnl: float = 0.0
@@ -417,6 +420,9 @@ def run_backtest(
     contract_size=1.0,
     point=0.0,
     starting_equity=10_000.0,
+    entry_mode="market",
+    limit_offset_atr=0.5,
+    limit_expiry_bars=4,
     apply_daily_limit=True,
     rsi_period=None,
     oversold=None,
@@ -441,14 +447,16 @@ def run_backtest(
             )
         return _run(
             df, spread, contract_size, point, starting_equity,
-            apply_daily_limit, rsi_period,
+            apply_daily_limit, rsi_period, entry_mode, limit_offset_atr,
+            limit_expiry_bars,
         )
     finally:
         Config.RSI_OVERSOLD, Config.RSI_OVERBOUGHT = saved
 
 
 def _run(df, spread, contract_size, point, starting_equity, apply_daily_limit,
-         rsi_period):
+         rsi_period, entry_mode="market", limit_offset_atr=0.5,
+         limit_expiry_bars=4):
     """The plain strategy: RSI crossing back through a fixed threshold."""
 
     rsi = compute_rsi(df["close"], rsi_period).to_numpy()
@@ -461,7 +469,10 @@ def _run(df, spread, contract_size, point, starting_equity, apply_daily_limit,
         return stop, target
 
     return _simulate(df, decide, levels, spread, contract_size, starting_equity,
-                     apply_daily_limit)
+                     apply_daily_limit, entry_mode=entry_mode,
+                     atr=average_true_range(df, rsi_period),
+                     limit_offset_atr=limit_offset_atr,
+                     limit_expiry_bars=limit_expiry_bars)
 
 
 class ConfirmedStrategy:
@@ -569,7 +580,9 @@ class ConfirmedStrategy:
 def run_confirmed_backtest(df, *, spread=0.0, contract_size=1.0,
                            starting_equity=10_000.0, apply_daily_limit=True,
                            rsi_period=None, oversold=None, overbought=None,
-                           ema_period=0, **strategy_kwargs):
+                           ema_period=0, entry_mode="market",
+                           limit_offset_atr=0.5, limit_expiry_bars=4,
+                           **strategy_kwargs):
     """Backtest the confirmed strategy. Returns (Result, ConfirmedStrategy)."""
 
     rsi_period = rsi_period or Config.RSI_PERIOD
@@ -585,24 +598,39 @@ def run_confirmed_backtest(df, *, spread=0.0, contract_size=1.0,
         **strategy_kwargs
     )
     result = _simulate(df, strategy.decide, strategy.levels, spread, contract_size,
-                       starting_equity, apply_daily_limit)
+                       starting_equity, apply_daily_limit, entry_mode=entry_mode,
+                       atr=atr, limit_offset_atr=limit_offset_atr,
+                       limit_expiry_bars=limit_expiry_bars)
     return result, strategy
 
 
 def _simulate(df, decide, levels, spread, contract_size, starting_equity,
-              apply_daily_limit):
+              apply_daily_limit, entry_mode="market", atr=None,
+              limit_offset_atr=0.5, limit_expiry_bars=4):
     """Bar-by-bar fill engine, shared by both strategies.
 
-    `decide(i)` returns "BUY", "SELL" or None for a fill at bar i's open.
-    `levels(side, entry, i)` returns the stop and target for that fill.
+    `decide(i)` returns "BUY", "SELL" or None. `levels(side, entry, i)` returns
+    the stop and target for that fill.
 
-    Keeping this in one place means the fill mechanics verified in
-    test_backtest.py are the mechanics both strategies are measured with.
+    Two entry modes:
+
+      market  fill at bar i's open, paying the spread. Always fills.
+      limit   rest an order `limit_offset_atr` x ATR better than that open and
+              fill only if price comes to it within `limit_expiry_bars`.
+
+    On what a limit order does and does not buy you: it does **not** escape the
+    spread. With a retail FX broker a buy limit is a level on the *ask*, so the
+    spread is paid either way. What it buys is a better entry level, at the cost
+    of missing every trade where price never comes back. For mean reversion that
+    trade-off is worth measuring, because the trades it misses are the ones that
+    ran away — but the selection cuts both ways and only the test can say which
+    way it lands.
     """
 
     opens = df["open"].to_numpy()
     highs = df["high"].to_numpy()
     lows = df["low"].to_numpy()
+    closes = df["close"].to_numpy()
     times = df["time"].tolist()
 
     volume = Config.LOT_SIZE
@@ -611,9 +639,22 @@ def _simulate(df, decide, levels, spread, contract_size, starting_equity,
     equity = starting_equity
     open_trade = None
     stop = target = 0.0
+    pending = None          # (side, limit_price, placed_index, expiry_index)
     day = None
     day_open_equity = equity
     halted = False
+
+    def enter(side, fill_price, index):
+        """Open a position at a bid-terms price, paying the spread to buy."""
+        nonlocal open_trade, stop, target
+        entry = fill_price + spread if side == "BUY" else fill_price
+        computed = levels(side, entry, index)
+        if computed is None:
+            return False
+        stop, target = computed
+        open_trade = Trade(side=side, entry_index=index, entry_time=times[index],
+                           entry_price=entry)
+        return True
 
     for i in range(1, len(df)):
         # --- daily loss limit, replaying what the live bot does -----------
@@ -655,20 +696,61 @@ def _simulate(df, decide, levels, spread, contract_size, starting_equity,
                 result.trades.append(open_trade)
                 open_trade = None
 
+        # --- a resting limit order ----------------------------------------
+        if pending is not None and open_trade is None:
+            side, limit_price, _, expiry = pending
+            # Require price to trade *through* the level, not merely touch it.
+            # A level touched once may not fill a retail order sitting at the
+            # back of the queue, and assuming it does is how limit backtests
+            # flatter themselves.
+            through = lows[i] < limit_price if side == "BUY" else highs[i] > limit_price
+            if through:
+                # A gap past your limit fills at the open, which is better than
+                # the limit — that is real, not optimism.
+                fill = (min(opens[i], limit_price) if side == "BUY"
+                        else max(opens[i], limit_price))
+                pending = None
+                if apply_daily_limit and halted:
+                    result.blocked_by_daily_limit += 1
+                elif enter(side, fill, i):
+                    result.limits_filled += 1
+            elif i >= expiry:
+                pending = None
+                result.limits_expired += 1
+
         # --- look for an entry --------------------------------------------
-        if open_trade is None:
+        if open_trade is None and pending is None:
             action = decide(i)
             if action:
                 if apply_daily_limit and halted:
                     result.blocked_by_daily_limit += 1
+                elif entry_mode == "market":
+                    enter(action, opens[i], i)
                 else:
-                    # A long enters at the ask.
-                    entry = opens[i] + spread if action == "BUY" else opens[i]
-                    computed = levels(action, entry, i)
-                    if computed is not None:
-                        stop, target = computed
-                        open_trade = Trade(side=action, entry_index=i,
-                                           entry_time=times[i], entry_price=entry)
+                    # Anchor to the signal bar's close, not this bar's open.
+                    # Anchoring to the open means a gap moves the order with
+                    # it, so you chase price down instead of being filled by
+                    # the move you were waiting for.
+                    reference = closes[i - 1]
+                    offset = limit_offset_atr * (
+                        atr[i - 1] if atr is not None and atr[i - 1] else 0.0
+                    )
+                    if offset <= 0:
+                        continue
+                    limit_price = (reference - offset if action == "BUY"
+                                   else reference + offset)
+                    pending = (action, limit_price, i, i + limit_expiry_bars)
+                    result.limits_placed += 1
+                    # The order rests from this bar's open, so this bar's own
+                    # range can fill it.
+                    through = (lows[i] < limit_price if action == "BUY"
+                               else highs[i] > limit_price)
+                    if through:
+                        fill = (min(opens[i], limit_price) if action == "BUY"
+                                else max(opens[i], limit_price))
+                        pending = None
+                        if enter(action, fill, i):
+                            result.limits_filled += 1
 
         result.equity.append(equity)
 
@@ -933,9 +1015,9 @@ def run_suite(df, meta, *, spread, contract_size, point, equity, out_path=None):
         )
         return summarise(result, equity), strategy
 
-    def simple(data):
+    def simple(data, **kw):
         return summarise(
-            run_backtest(data, point=point, **common), equity
+            run_backtest(data, point=point, **common, **kw), equity
         )
 
     headers = ["strategy", "trades", "win%", "PF", "net", "maxDD%", "note"]
@@ -965,6 +1047,14 @@ def run_suite(df, meta, *, spread, contract_size, point, equity, out_path=None):
     rows.append(_row("confirmed, long only", stats,
                      f"{strategy.filtered_count} filtered out"))
 
+    # Execution, not signal. A resting order gives a better entry level at the
+    # cost of missing trades that never come back.
+    limit_stats = simple(df, entry_mode="limit", limit_offset_atr=0.5)
+    rows.append(_row("simple, limit entry 0.5 ATR", limit_stats, "resting order"))
+
+    stats, strategy = confirmed(df, entry_mode="limit", limit_offset_atr=1.0)
+    rows.append(_row("confirmed, limit entry 1.0 ATR", stats, "resting order"))
+
     # Round the money columns only at the point of display.
     display = [(r[0], r[1], r[2], r[3], f"{r[4]:+.2f}", f"{r[5]:.2f}", r[6])
                for r in rows]
@@ -975,9 +1065,16 @@ def run_suite(df, meta, *, spread, contract_size, point, equity, out_path=None):
                       ("confirmed, divergence-only", {"divergence_only": True}),
                       ("confirmed + EMA 100", {"ema_period": 100}),
                       ("confirmed, long only", {"long_only": True}),
-                      ("simple", None)):
+                      ("confirmed, limit entry 1.0 ATR",
+                       {"entry_mode": "limit", "limit_offset_atr": 1.0}),
+                      ("simple", None),
+                      ("simple, limit entry 0.5 ATR",
+                       {"__simple_limit__": True})):
         if kw is None:
             si, so = simple(in_sample), simple(out_sample)
+        elif kw.get("__simple_limit__"):
+            limit_kw = dict(entry_mode="limit", limit_offset_atr=0.5)
+            si, so = simple(in_sample, **limit_kw), simple(out_sample, **limit_kw)
         else:
             si, _ = confirmed(in_sample, **kw)
             so, _ = confirmed(out_sample, **kw)
@@ -1085,6 +1182,15 @@ def main():
                         help="aggregate to a longer bar before testing, e.g. "
                              "15min or 1h. Use when the file is M1 but the "
                              "strategy trades M15.")
+    parser.add_argument("--entry", choices=("market", "limit"), default="market",
+                        help="market fills at the next open and always fills; "
+                             "limit rests an order better than the signal close "
+                             "and only fills if price comes to it")
+    parser.add_argument("--limit-offset-atr", type=float, default=0.5,
+                        help="how far better than the signal close to rest the "
+                             "order, in ATR multiples (default 0.5)")
+    parser.add_argument("--limit-expiry-bars", type=int, default=4,
+                        help="cancel an unfilled order after this many bars")
     parser.add_argument("--suite", action="store_true",
                         help="run every strategy and filter on this data, plus a "
                              "70/30 walk forward, and summarise")

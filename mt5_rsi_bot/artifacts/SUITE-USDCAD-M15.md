@@ -24,6 +24,8 @@
 | confirmed + EMA 100 | 227 | 22.0 | 0.659 | -164.14 | 1.68 | 1135 filtered out |
 | confirmed + EMA 200 | 271 | 22.9 | 0.648 | -177.53 | 1.93 | 1100 filtered out |
 | confirmed, long only | 529 | 21.6 | 0.819 | -138.94 | 1.64 | 598 filtered out |
+| simple, limit entry 0.5 ATR | 808 | 33.3 | 0.930 | -82.69 | 0.98 | resting order |
+| confirmed, limit entry 1.0 ATR | 702 | 21.4 | 0.721 | -180.62 | 1.81 | resting order |
 
 ## Walk forward (70/30 at bar 50004)
 
@@ -33,7 +35,9 @@
 | confirmed, divergence-only | 377 | -303.79 | 227 | -159.58 |
 | confirmed + EMA 100 | 147 | -137.24 | 83 | -31.39 |
 | confirmed, long only | 342 | -36.71 | 186 | -107.37 |
+| confirmed, limit entry 1.0 ATR | 446 | -95.62 | 256 | -84.99 |
 | simple | 790 | -135.54 | 297 | -115.72 |
+| simple, limit entry 0.5 ATR | 569 | -5.64 | 239 | -77.06 |
 
 ## Reading this
 
