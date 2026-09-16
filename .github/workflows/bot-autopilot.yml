@@ -1,0 +1,41 @@
+name: Bot autopilot
+
+# Bot pull requests that Renovate labels `automerge` are queued for GitHub's native
+# auto-merge here, so low-risk updates land on their own instead of waiting for someone
+# to click merge. Branch protection is still the gate: GitHub only completes the merge
+# once every required status check — and every required review, if the branch requires
+# them — is satisfied. This workflow never approves a pull request.
+#
+# `pull_request_target` is used so the job keeps a writable token on bot branches.
+# No repository code is checked out or executed here, only the GitHub CLI.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, labeled, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bot-autopilot-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  automerge:
+    name: Queue bot update for auto-merge
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.pull_request.draft == false &&
+      contains(fromJSON('["renovate[bot]", "dependabot[bot]"]'), github.event.pull_request.user.login) &&
+      contains(github.event.pull_request.labels.*.name, 'automerge')
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Enable auto-merge
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}

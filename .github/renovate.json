@@ -1,10 +1,26 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
+  "extends": ["config:recommended", ":dependencyDashboard", ":semanticCommits"],
   "timezone": "Europe/Athens",
+  "labels": ["dependencies"],
+  "rebaseWhen": "behind-base-branch",
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "automergeStrategy": "squash",
+  "platformAutomerge": true,
   "lockFileMaintenance": {
     "enabled": true,
-    "schedule": ["before 9am on the first day of the month"]
+    "schedule": ["before 9am on the first day of the month"],
+    "automerge": true,
+    "addLabels": ["automerge"]
+  },
+  "vulnerabilityAlerts": {
+    "description": "Security fixes skip the weekly windows and ship as soon as CI is green.",
+    "schedule": ["at any time"],
+    "minimumReleaseAge": null,
+    "prCreation": "immediate",
+    "automerge": true,
+    "addLabels": ["security", "automerge"]
   },
   "packageRules": [
     {
@@ -13,16 +29,28 @@
       "matchUpdateTypes": ["major", "minor", "patch"],
       "schedule": ["after 10am and before 11am on Monday"],
       "groupName": "framework dependency updates",
-      "minimumReleaseAge": "7 days"
+      "minimumReleaseAge": "7 days",
+      "automerge": false
     },
     {
       "description": "Group lower-risk type and tooling updates.",
-      "matchPackageNames": ["@biomejs/biome", "@next/bundle-analyzer", "@octokit/openapi-types", "@playwright/test", "@tailwindcss/postcss", "husky", "tailwindcss", "typescript"],
-      "matchPackagePatterns": ["^@types/"],
+      "matchPackageNames": [
+        "@biomejs/biome",
+        "@next/bundle-analyzer",
+        "@octokit/openapi-types",
+        "@playwright/test",
+        "@tailwindcss/postcss",
+        "husky",
+        "tailwindcss",
+        "typescript",
+        "/^@types\\//"
+      ],
       "matchUpdateTypes": ["minor", "patch"],
       "schedule": ["after 2pm and before 3pm on Wednesday"],
       "groupName": "tooling and type dependency updates",
-      "minimumReleaseAge": "3 days"
+      "minimumReleaseAge": "3 days",
+      "automerge": true,
+      "addLabels": ["automerge"]
     },
     {
       "description": "Group app runtime minor and patch updates apart from framework packages.",
@@ -45,15 +73,28 @@
       "matchUpdateTypes": ["minor", "patch"],
       "schedule": ["after 4pm and before 5pm on Friday"],
       "groupName": "runtime dependency updates",
-      "minimumReleaseAge": "3 days"
+      "minimumReleaseAge": "3 days",
+      "automerge": true,
+      "addLabels": ["automerge"]
+    },
+    {
+      "description": "Keep workflow action updates moving without manual review.",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "schedule": ["after 2pm and before 3pm on Wednesday"],
+      "groupName": "github actions updates",
+      "minimumReleaseAge": "3 days",
+      "automerge": true,
+      "addLabels": ["automerge"]
     },
     {
       "description": "Keep non-framework major updates separate from routine groups.",
       "matchUpdateTypes": ["major"],
-      "excludePackageNames": ["next", "react", "react-dom"],
+      "matchPackageNames": ["!next", "!react", "!react-dom"],
       "schedule": ["after 9am and before 10am on Tuesday"],
       "groupName": "major dependency updates",
-      "minimumReleaseAge": "7 days"
+      "minimumReleaseAge": "7 days",
+      "automerge": false
     }
   ]
 }
