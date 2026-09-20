@@ -1,0 +1,1371 @@
+{
+  "version": 3,
+  "generatedAt": "2026-09-20T19:19:12.870Z",
+  "totals": {
+    "repos": 35552,
+    "plugins": 93444,
+    "stars": 7097679
+  },
+  "growth": {
+    "asOf": "2026-08-27T02:32:48.470Z",
+    "size": 35588,
+    "snapshots": 255,
+    "windows": [
+      {
+        "label": "7-day",
+        "requestedDays": 7,
+        "actualDays": 10.2,
+        "from": "2026-08-16T21:56:46.712Z",
+        "to": "2026-08-27T02:32:48.470Z",
+        "startSize": 33702,
+        "endSize": 35588,
+        "added": 1886,
+        "changePercent": 5.6,
+        "perDay": 185.1
+      },
+      {
+        "label": "30-day",
+        "requestedDays": 30,
+        "actualDays": 41.4,
+        "from": "2026-07-16T16:50:59.665Z",
+        "to": "2026-08-27T02:32:48.470Z",
+        "startSize": 27797,
+        "endSize": 35588,
+        "added": 7791,
+        "changePercent": 28,
+        "perDay": 188.2
+      },
+      {
+        "label": "90-day",
+        "requestedDays": 90,
+        "actualDays": 90.7,
+        "from": "2026-05-28T10:05:03.310Z",
+        "to": "2026-08-27T02:32:48.470Z",
+        "startSize": 19041,
+        "endSize": 35588,
+        "added": 16547,
+        "changePercent": 86.9,
+        "perDay": 182.5
+      }
+    ],
+    "trend": "steady",
+    "doublingDays": 100.5
+  },
+  "concentration": {
+    "totalStars": 7097679,
+    "medianStars": 1,
+    "meanStars": 199.6,
+    "p90Stars": 26,
+    "tractionBar": 26,
+    "tractionRate": 10.1,
+    "topOnePercentStarShare": 90.1,
+    "topTenPercentStarShare": 99,
+    "giniCoefficient": 0.988,
+    "zeroStarShare": 49.6
+  },
+  "engagement": {
+    "totalForks": 787091,
+    "totalSubscribers": 48415,
+    "watchRatePerThousandStars": 6.8,
+    "forkRatePerThousandStars": 110.9
+  },
+  "intent": [
+    {
+      "intent": "purpose-built",
+      "repos": 26828,
+      "share": 75.5,
+      "stars": 4948621,
+      "starShare": 69.7
+    },
+    {
+      "intent": "adjacent",
+      "repos": 2246,
+      "share": 6.3,
+      "stars": 1104890,
+      "starShare": 15.6
+    },
+    {
+      "intent": "incidental",
+      "repos": 6478,
+      "share": 18.2,
+      "stars": 1044168,
+      "starShare": 14.7
+    }
+  ],
+  "segments": [
+    {
+      "id": "unclassified",
+      "label": "Unclassified",
+      "repos": 10621,
+      "repoShare": 29.9,
+      "stars": 677895,
+      "starShare": 9.6,
+      "medianStars": 0,
+      "plugins": 26668,
+      "tractionRate": 6.8,
+      "purposeBuiltShare": 49.2,
+      "demandIndex": 0.67,
+      "supplyIndex": 13.21,
+      "demand": "unrated",
+      "exemplars": [
+        {
+          "path": "DietrichGebert/ponytail",
+          "url": "https://github.com/DietrichGebert/ponytail",
+          "stars": 111940,
+          "plugins": 1
+        },
+        {
+          "path": "yamadashy/repomix",
+          "url": "https://github.com/yamadashy/repomix",
+          "stars": 28061,
+          "plugins": 3
+        },
+        {
+          "path": "EveryInc/compound-engineering-plugin",
+          "url": "https://github.com/EveryInc/compound-engineering-plugin",
+          "stars": 24544,
+          "plugins": 1
+        }
+      ]
+    },
+    {
+      "id": "skill-libraries",
+      "label": "Skill & prompt libraries",
+      "repos": 8967,
+      "repoShare": 25.2,
+      "stars": 2128499,
+      "starShare": 30,
+      "medianStars": 0,
+      "plugins": 33841,
+      "tractionRate": 9.1,
+      "purposeBuiltShare": 98.5,
+      "demandIndex": 0.9,
+      "supplyIndex": 11.15,
+      "demand": "crowded",
+      "exemplars": [
+        {
+          "path": "obra/superpowers",
+          "url": "https://github.com/obra/superpowers",
+          "stars": 277576,
+          "plugins": 1
+        },
+        {
+          "path": "mattpocock/skills",
+          "url": "https://github.com/mattpocock/skills",
+          "stars": 237750,
+          "plugins": 1
+        },
+        {
+          "path": "multica-ai/andrej-karpathy-skills",
+          "url": "https://github.com/multica-ai/andrej-karpathy-skills",
+          "stars": 207396,
+          "plugins": 1
+        }
+      ]
+    },
+    {
+      "id": "mcp-integrations",
+      "label": "MCP servers & integrations",
+      "repos": 2073,
+      "repoShare": 5.8,
+      "stars": 243883,
+      "starShare": 3.4,
+      "medianStars": 1,
+      "plugins": 5338,
+      "tractionRate": 12.1,
+      "purposeBuiltShare": 97,
+      "demandIndex": 1.2,
+      "supplyIndex": 2.58,
+      "demand": "crowded",
+      "exemplars": [
+        {
+          "path": "headroomlabs-ai/headroom",
+          "url": "https://github.com/headroomlabs-ai/headroom",
+          "stars": 67668,
+          "plugins": 1
+        },
+        {
+          "path": "chopratejas/headroom",
+          "url": "https://github.com/chopratejas/headroom",
+          "stars": 45078,
+          "plugins": 1
+        },
+        {
+          "path": "mcp-use/mcp-use",
+          "url": "https://github.com/mcp-use/mcp-use",
+          "stars": 10526,
+          "plugins": 5
+        }
+      ]
+    },
+    {
+      "id": "orchestration",
+      "label": "Orchestration & multi-agent",
+      "repos": 1956,
+      "repoShare": 5.5,
+      "stars": 206221,
+      "starShare": 2.9,
+      "medianStars": 1,
+      "plugins": 5230,
+      "tractionRate": 10,
+      "purposeBuiltShare": 83.1,
+      "demandIndex": 0.99,
+      "supplyIndex": 2.43,
+      "demand": "crowded",
+      "exemplars": [
+        {
+          "path": "ruvnet/ruflo",
+          "url": "https://github.com/ruvnet/ruflo",
+          "stars": 69434,
+          "plugins": 38
+        },
+        {
+          "path": "Yeachan-Heo/oh-my-claudecode",
+          "url": "https://github.com/Yeachan-Heo/oh-my-claudecode",
+          "stars": 38798,
+          "plugins": 1
+        },
+        {
+          "path": "superset-sh/superset",
+          "url": "https://github.com/superset-sh/superset",
+          "stars": 13367,
+          "plugins": 1
+        }
+      ]
+    },
+    {
+      "id": "dev-tooling",
+      "label": "Developer tooling",
+      "repos": 1584,
+      "repoShare": 4.5,
+      "stars": 301844,
+      "starShare": 4.3,
+      "medianStars": 1,
+      "plugins": 4442,
+      "tractionRate": 11.9,
+      "purposeBuiltShare": 74.2,
+      "demandIndex": 1.18,
+      "supplyIndex": 1.97,
+      "demand": "crowded",
+      "exemplars": [
+        {
+          "path": "anthropics/claude-code",
+          "url": "https://github.com/anthropics/claude-code",
+          "stars": 143025,
+          "plugins": 13
+        },
+        {
+          "path": "jnMetaCode/superpowers-zh",
+          "url": "https://github.com/jnMetaCode/superpowers-zh",
+          "stars": 7817,
+          "plugins": 1
+        },
+        {
+          "path": "max-sixty/worktrunk",
+          "url": "https://github.com/max-sixty/worktrunk",
+          "stars": 6634,
+          "plugins": 1
+        }
+      ]
+    },
+    {
+      "id": "productivity-pm",
+      "label": "Productivity & project management",
+      "repos": 1341,
+      "repoShare": 3.8,
+      "stars": 223308,
+      "starShare": 3.1,
+      "medianStars": 1,
+      "plugins": 2093,
+      "tractionRate": 10.4,
+      "purposeBuiltShare": 80.2,
+      "demandIndex": 1.03,
+      "supplyIndex": 1.67,
+      "demand": "crowded",
+      "exemplars": [
+        {
+          "path": "santifer/career-ops",
+          "url": "https://github.com/santifer/career-ops",
+          "stars": 68519,
+          "plugins": 1
+        },
+        {
+          "path": "openai/codex-plugin-cc",
+          "url": "https://github.com/openai/codex-plugin-cc",
+          "stars": 32379,
+          "plugins": 1
+        },
+        {
+          "path": "eyaltoledano/claude-task-master",
+          "url": "https://github.com/eyaltoledano/claude-task-master",
+          "stars": 28022,
+          "plugins": 1
+        }
+      ]
+    },
+    {
+      "id": "code-quality",
+      "label": "Code review, testing & quality",
+      "repos": 1187,
+      "repoShare": 3.3,
+      "stars": 169732,
+      "starShare": 2.4,
+      "medianStars": 1,
+      "plugins": 2151,
+      "tractionRate": 12,
+      "purposeBuiltShare": 79.7,
+      "demandIndex": 1.19,
+      "supplyIndex": 1.48,
+      "demand": "crowded",
+      "exemplars": [
+        {
+          "path": "darrenhinde/OpenAgentsControl",
+          "url": "https://github.com/darrenhinde/OpenAgentsControl",
+          "stars": 4778,
+          "plugins": 1
+        },
+        {
+          "path": "sentrux/sentrux",
+          "url": "https://github.com/sentrux/sentrux",
+          "stars": 2906,
+          "plugins": 1
+        },
+        {
+          "path": "nizos/tdd-guard",
+          "url": "https://github.com/nizos/tdd-guard",
+          "stars": 2311,
+          "plugins": 1
+        }
+      ]
+    },
+    {
+      "id": "devops-cloud",
+      "label": "DevOps, cloud & infrastructure",
+      "repos": 945,
+      "repoShare": 2.7,
+      "stars": 108297,
+      "starShare": 1.5,
+      "medianStars": 1,
+      "plugins": 1639,
+      "tractionRate": 12.6,
+      "purposeBuiltShare": 77.2,
+      "demandIndex": 1.25,
+      "supplyIndex": 1.18,
+      "demand": "balanced",
+      "exemplars": [
+        {
+          "path": "kubeshark/kubeshark",
+          "url": "https://github.com/kubeshark/kubeshark",
+          "stars": 12057,
+          "plugins": 1
+        },
+        {
+          "path": "ykdojo/claude-code-tips",
+          "url": "https://github.com/ykdojo/claude-code-tips",
+          "stars": 9932,
+          "plugins": 1
+        },
+        {
+          "path": "cloudflare/skills",
+          "url": "https://github.com/cloudflare/skills",
+          "stars": 2717,
+          "plugins": 1
+        }
+      ]
+    },
+    {
+      "id": "docs-writing",
+      "label": "Docs & writing",
+      "repos": 895,
+      "repoShare": 2.5,
+      "stars": 253171,
+      "starShare": 3.6,
+      "medianStars": 1,
+      "plugins": 1266,
+      "tractionRate": 13.1,
+      "purposeBuiltShare": 75.4,
+      "demandIndex": 1.3,
+      "supplyIndex": 1.11,
+      "demand": "balanced",
+      "exemplars": [
+        {
+          "path": "kepano/obsidian-skills",
+          "url": "https://github.com/kepano/obsidian-skills",
+          "stars": 47255,
+          "plugins": 1
+        },
+        {
+          "path": "blader/humanizer",
+          "url": "https://github.com/blader/humanizer",
+          "stars": 38030,
+          "plugins": 1
+        },
+        {
+          "path": "AgriciDaniel/claude-obsidian",
+          "url": "https://github.com/AgriciDaniel/claude-obsidian",
+          "stars": 12922,
+          "plugins": 1
+        }
+      ]
+    },
+    {
+      "id": "research-learning",
+      "label": "Research & learning",
+      "repos": 888,
+      "repoShare": 2.5,
+      "stars": 248928,
+      "starShare": 3.5,
+      "medianStars": 1,
+      "plugins": 1624,
+      "tractionRate": 13.7,
+      "purposeBuiltShare": 81.3,
+      "demandIndex": 1.36,
+      "supplyIndex": 1.1,
+      "demand": "balanced",
+      "exemplars": [
+        {
+          "path": "Egonex-AI/Understand-Anything",
+          "url": "https://github.com/Egonex-AI/Understand-Anything",
+          "stars": 80570,
+          "plugins": 1
+        },
+        {
+          "path": "Lum1104/Understand-Anything",
+          "url": "https://github.com/Lum1104/Understand-Anything",
+          "stars": 54661,
+          "plugins": 1
+        },
+        {
+          "path": "Imbad0202/academic-research-skills",
+          "url": "https://github.com/Imbad0202/academic-research-skills",
+          "stars": 43770,
+          "plugins": 1
+        }
+      ]
+    },
+    {
+      "id": "memory-context",
+      "label": "Memory & context engineering",
+      "repos": 804,
+      "repoShare": 2.3,
+      "stars": 494357,
+      "starShare": 7,
+      "medianStars": 1,
+      "plugins": 1081,
+      "tractionRate": 15.3,
+      "purposeBuiltShare": 79.5,
+      "demandIndex": 1.51,
+      "supplyIndex": 1,
+      "demand": "underserved",
+      "exemplars": [
+        {
+          "path": "thedotmack/claude-mem",
+          "url": "https://github.com/thedotmack/claude-mem",
+          "stars": 91838,
+          "plugins": 2
+        },
+        {
+          "path": "mem0ai/mem0",
+          "url": "https://github.com/mem0ai/mem0",
+          "stars": 64046,
+          "plugins": 1
+        },
+        {
+          "path": "volcengine/OpenViking",
+          "url": "https://github.com/volcengine/OpenViking",
+          "stars": 33510,
+          "plugins": 1
+        }
+      ]
+    },
+    {
+      "id": "media-creative",
+      "label": "Media & creative generation",
+      "repos": 800,
+      "repoShare": 2.3,
+      "stars": 314976,
+      "starShare": 4.4,
+      "medianStars": 1,
+      "plugins": 1083,
+      "tractionRate": 14,
+      "purposeBuiltShare": 80,
+      "demandIndex": 1.39,
+      "supplyIndex": 1,
+      "demand": "underserved",
+      "exemplars": [
+        {
+          "path": "mvanhorn/last30days-skill",
+          "url": "https://github.com/mvanhorn/last30days-skill",
+          "stars": 59263,
+          "plugins": 1
+        },
+        {
+          "path": "bradautomates/claude-video",
+          "url": "https://github.com/bradautomates/claude-video",
+          "stars": 16214,
+          "plugins": 1
+        },
+        {
+          "path": "ConardLi/garden-skills",
+          "url": "https://github.com/ConardLi/garden-skills",
+          "stars": 10738,
+          "plugins": 5
+        }
+      ]
+    },
+    {
+      "id": "agent-frameworks",
+      "label": "Agent frameworks & harnesses",
+      "repos": 723,
+      "repoShare": 2,
+      "stars": 276365,
+      "starShare": 3.9,
+      "medianStars": 1,
+      "plugins": 1173,
+      "tractionRate": 16.5,
+      "purposeBuiltShare": 50.2,
+      "demandIndex": 1.63,
+      "supplyIndex": 0.9,
+      "demand": "underserved",
+      "exemplars": [
+        {
+          "path": "mukul975/Anthropic-Cybersecurity-Skills",
+          "url": "https://github.com/mukul975/Anthropic-Cybersecurity-Skills",
+          "stars": 31133,
+          "plugins": 1
+        },
+        {
+          "path": "QwenLM/Qwen-MM-Plugins",
+          "url": "https://github.com/QwenLM/Qwen-MM-Plugins",
+          "stars": 2777,
+          "plugins": 8
+        },
+        {
+          "path": "modelcontextprotocol/ext-apps",
+          "url": "https://github.com/modelcontextprotocol/ext-apps",
+          "stars": 2761,
+          "plugins": 1
+        }
+      ]
+    },
+    {
+      "id": "data-analytics",
+      "label": "Data & analytics",
+      "repos": 583,
+      "repoShare": 1.6,
+      "stars": 72213,
+      "starShare": 1,
+      "medianStars": 1,
+      "plugins": 892,
+      "tractionRate": 14.4,
+      "purposeBuiltShare": 70.8,
+      "demandIndex": 1.43,
+      "supplyIndex": 0.73,
+      "demand": "underserved",
+      "exemplars": [
+        {
+          "path": "InsForge/InsForge",
+          "url": "https://github.com/InsForge/InsForge",
+          "stars": 12785,
+          "plugins": 1
+        },
+        {
+          "path": "repowise-dev/repowise",
+          "url": "https://github.com/repowise-dev/repowise",
+          "stars": 6221,
+          "plugins": 1
+        },
+        {
+          "path": "mvanhorn/cli-printing-press",
+          "url": "https://github.com/mvanhorn/cli-printing-press",
+          "stars": 4545,
+          "plugins": 1
+        }
+      ]
+    },
+    {
+      "id": "security",
+      "label": "Security & compliance",
+      "repos": 513,
+      "repoShare": 1.4,
+      "stars": 370013,
+      "starShare": 5.2,
+      "medianStars": 2,
+      "plugins": 1783,
+      "tractionRate": 17.7,
+      "purposeBuiltShare": 85.4,
+      "demandIndex": 1.75,
+      "supplyIndex": 0.64,
+      "demand": "underserved",
+      "exemplars": [
+        {
+          "path": "affaan-m/ECC",
+          "url": "https://github.com/affaan-m/ECC",
+          "stars": 243315,
+          "plugins": 1
+        },
+        {
+          "path": "alirezarezvani/claude-skills",
+          "url": "https://github.com/alirezarezvani/claude-skills",
+          "stars": 24975,
+          "plugins": 97
+        },
+        {
+          "path": "promptfoo/promptfoo",
+          "url": "https://github.com/promptfoo/promptfoo",
+          "stars": 24570,
+          "plugins": 1
+        }
+      ]
+    },
+    {
+      "id": "design-ui",
+      "label": "Design & UI",
+      "repos": 438,
+      "repoShare": 1.2,
+      "stars": 340277,
+      "starShare": 4.8,
+      "medianStars": 1,
+      "plugins": 754,
+      "tractionRate": 15.5,
+      "purposeBuiltShare": 76.7,
+      "demandIndex": 1.53,
+      "supplyIndex": 0.54,
+      "demand": "underserved",
+      "exemplars": [
+        {
+          "path": "nextlevelbuilder/ui-ux-pro-max-skill",
+          "url": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill",
+          "stars": 120961,
+          "plugins": 1
+        },
+        {
+          "path": "cathrynlavery/diagram-design",
+          "url": "https://github.com/cathrynlavery/diagram-design",
+          "stars": 26986,
+          "plugins": 1
+        },
+        {
+          "path": "oso95/scroll-world",
+          "url": "https://github.com/oso95/scroll-world",
+          "stars": 8622,
+          "plugins": 1
+        }
+      ]
+    },
+    {
+      "id": "browser-automation",
+      "label": "Browser & automation",
+      "repos": 378,
+      "repoShare": 1.1,
+      "stars": 215327,
+      "starShare": 3,
+      "medianStars": 1,
+      "plugins": 501,
+      "tractionRate": 12.7,
+      "purposeBuiltShare": 79.1,
+      "demandIndex": 1.26,
+      "supplyIndex": 0.47,
+      "demand": "underserved",
+      "exemplars": [
+        {
+          "path": "ChromeDevTools/chrome-devtools-mcp",
+          "url": "https://github.com/ChromeDevTools/chrome-devtools-mcp",
+          "stars": 49710,
+          "plugins": 1
+        },
+        {
+          "path": "vercel-labs/agent-browser",
+          "url": "https://github.com/vercel-labs/agent-browser",
+          "stars": 41330,
+          "plugins": 1
+        },
+        {
+          "path": "citrolabs/ego-lite",
+          "url": "https://github.com/citrolabs/ego-lite",
+          "stars": 13645,
+          "plugins": 1
+        }
+      ]
+    },
+    {
+      "id": "seo-marketing",
+      "label": "SEO, marketing & growth",
+      "repos": 368,
+      "repoShare": 1,
+      "stars": 116247,
+      "starShare": 1.6,
+      "medianStars": 1,
+      "plugins": 629,
+      "tractionRate": 18.5,
+      "purposeBuiltShare": 85.3,
+      "demandIndex": 1.83,
+      "supplyIndex": 0.46,
+      "demand": "underserved",
+      "exemplars": [
+        {
+          "path": "coreyhaines31/marketingskills",
+          "url": "https://github.com/coreyhaines31/marketingskills",
+          "stars": 45638,
+          "plugins": 1
+        },
+        {
+          "path": "AgriciDaniel/claude-seo",
+          "url": "https://github.com/AgriciDaniel/claude-seo",
+          "stars": 15159,
+          "plugins": 1
+        },
+        {
+          "path": "AgriciDaniel/claude-ads",
+          "url": "https://github.com/AgriciDaniel/claude-ads",
+          "stars": 8493,
+          "plugins": 1
+        }
+      ]
+    },
+    {
+      "id": "finance-trading",
+      "label": "Finance & trading",
+      "repos": 298,
+      "repoShare": 0.8,
+      "stars": 92542,
+      "starShare": 1.3,
+      "medianStars": 1,
+      "plugins": 987,
+      "tractionRate": 11.4,
+      "purposeBuiltShare": 76.5,
+      "demandIndex": 1.13,
+      "supplyIndex": 0.37,
+      "demand": "balanced",
+      "exemplars": [
+        {
+          "path": "anthropics/financial-services-plugins",
+          "url": "https://github.com/anthropics/financial-services-plugins",
+          "stars": 7866,
+          "plugins": 8
+        },
+        {
+          "path": "jwangkun/claude-for-financial-services-cn",
+          "url": "https://github.com/jwangkun/claude-for-financial-services-cn",
+          "stars": 721,
+          "plugins": 10
+        },
+        {
+          "path": "quant-sentiment-ai/claude-equity-research",
+          "url": "https://github.com/quant-sentiment-ai/claude-equity-research",
+          "stars": 704,
+          "plugins": 1
+        }
+      ]
+    },
+    {
+      "id": "presentations",
+      "label": "Slides & presentations",
+      "repos": 190,
+      "repoShare": 0.5,
+      "stars": 243584,
+      "starShare": 3.4,
+      "medianStars": 1,
+      "plugins": 269,
+      "tractionRate": 23.7,
+      "purposeBuiltShare": 75.3,
+      "demandIndex": 2.35,
+      "supplyIndex": 0.24,
+      "demand": "underserved",
+      "exemplars": [
+        {
+          "path": "nexu-io/open-design",
+          "url": "https://github.com/nexu-io/open-design",
+          "stars": 91650,
+          "plugins": 1
+        },
+        {
+          "path": "zarazhangrui/frontend-slides",
+          "url": "https://github.com/zarazhangrui/frontend-slides",
+          "stars": 28139,
+          "plugins": 1
+        },
+        {
+          "path": "nicobailon/visual-explainer",
+          "url": "https://github.com/nicobailon/visual-explainer",
+          "stars": 9564,
+          "plugins": 1
+        }
+      ]
+    }
+  ],
+  "depth": [
+    {
+      "id": "unverified",
+      "label": "Plugin count unverified",
+      "repos": 297,
+      "share": 0.8,
+      "plugins": 0
+    },
+    {
+      "id": "none",
+      "label": "No plugins detected",
+      "repos": 0,
+      "share": 0,
+      "plugins": 0
+    },
+    {
+      "id": "single",
+      "label": "Single plugin",
+      "repos": 28368,
+      "share": 79.8,
+      "plugins": 28368
+    },
+    {
+      "id": "small-suite",
+      "label": "Small suite (2-9)",
+      "repos": 5506,
+      "share": 15.5,
+      "plugins": 20887
+    },
+    {
+      "id": "large-suite",
+      "label": "Large suite (10-49)",
+      "repos": 1198,
+      "share": 3.4,
+      "plugins": 21288
+    },
+    {
+      "id": "mega-marketplace",
+      "label": "Mega marketplace (50+)",
+      "repos": 183,
+      "share": 0.5,
+      "plugins": 22901
+    }
+  ],
+  "leaders": [
+    {
+      "path": "obra/superpowers",
+      "url": "https://github.com/obra/superpowers",
+      "stars": 277576,
+      "plugins": 1
+    },
+    {
+      "path": "affaan-m/ECC",
+      "url": "https://github.com/affaan-m/ECC",
+      "stars": 243315,
+      "plugins": 1
+    },
+    {
+      "path": "mattpocock/skills",
+      "url": "https://github.com/mattpocock/skills",
+      "stars": 237750,
+      "plugins": 1
+    },
+    {
+      "path": "multica-ai/andrej-karpathy-skills",
+      "url": "https://github.com/multica-ai/andrej-karpathy-skills",
+      "stars": 207396,
+      "plugins": 1
+    },
+    {
+      "path": "anthropics/skills",
+      "url": "https://github.com/anthropics/skills",
+      "stars": 171612,
+      "plugins": 5
+    },
+    {
+      "path": "f/prompts.chat",
+      "url": "https://github.com/f/prompts.chat",
+      "stars": 167904,
+      "plugins": 1
+    },
+    {
+      "path": "anthropics/claude-code",
+      "url": "https://github.com/anthropics/claude-code",
+      "stars": 143025,
+      "plugins": 13
+    },
+    {
+      "path": "vercel/next.js",
+      "url": "https://github.com/vercel/next.js",
+      "stars": 141939,
+      "plugins": 1
+    },
+    {
+      "path": "nextlevelbuilder/ui-ux-pro-max-skill",
+      "url": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill",
+      "stars": 120961,
+      "plugins": 1
+    },
+    {
+      "path": "DietrichGebert/ponytail",
+      "url": "https://github.com/DietrichGebert/ponytail",
+      "stars": 111940,
+      "plugins": 1
+    }
+  ],
+  "dataHealth": {
+    "repos": 35588,
+    "canonicalRepos": 35552,
+    "duplicatePaths": 36,
+    "missingDescription": 9247,
+    "unverifiedPluginCount": 297,
+    "zeroStar": 17624,
+    "unclassifiedShare": 29.9,
+    "describedUnclassifiedShare": 18.5
+  },
+  "momentum": {
+    "baseline": "1e10d4e",
+    "baselineRepos": 28165,
+    "currentRepos": 35552,
+    "entrants": 7857,
+    "exits": 470,
+    "netRepoChange": 7387,
+    "starDelta": 956282,
+    "pluginDelta": 19132,
+    "topGainers": [
+      {
+        "path": "mattpocock/skills",
+        "url": "https://github.com/mattpocock/skills",
+        "stars": 237750,
+        "plugins": 1,
+        "previousStars": 194162,
+        "starDelta": 43588,
+        "starDeltaPercent": 22.4,
+        "pluginDelta": 0,
+        "segment": "skill-libraries"
+      },
+      {
+        "path": "cathrynlavery/diagram-design",
+        "url": "https://github.com/cathrynlavery/diagram-design",
+        "stars": 26986,
+        "plugins": 1,
+        "previousStars": 2897,
+        "starDelta": 24089,
+        "starDeltaPercent": 831.5,
+        "pluginDelta": 0,
+        "segment": "design-ui"
+      },
+      {
+        "path": "DietrichGebert/ponytail",
+        "url": "https://github.com/DietrichGebert/ponytail",
+        "stars": 111940,
+        "plugins": 1,
+        "previousStars": 91350,
+        "starDelta": 20590,
+        "starDeltaPercent": 22.5,
+        "pluginDelta": 0,
+        "segment": "unclassified"
+      },
+      {
+        "path": "obra/superpowers",
+        "url": "https://github.com/obra/superpowers",
+        "stars": 277576,
+        "plugins": 1,
+        "previousStars": 262690,
+        "starDelta": 14886,
+        "starDeltaPercent": 5.7,
+        "pluginDelta": 0,
+        "segment": "skill-libraries"
+      },
+      {
+        "path": "Leonxlnx/taste-skill",
+        "url": "https://github.com/Leonxlnx/taste-skill",
+        "stars": 80855,
+        "plugins": 1,
+        "previousStars": 68828,
+        "starDelta": 12027,
+        "starDeltaPercent": 17.5,
+        "pluginDelta": 0,
+        "segment": "skill-libraries"
+      },
+      {
+        "path": "ayghri/i-have-adhd",
+        "url": "https://github.com/ayghri/i-have-adhd",
+        "stars": 24451,
+        "plugins": 1,
+        "previousStars": 13088,
+        "starDelta": 11363,
+        "starDeltaPercent": 86.8,
+        "pluginDelta": 0,
+        "segment": "skill-libraries"
+      },
+      {
+        "path": "freestylefly/awesome-gpt-image-2",
+        "url": "https://github.com/freestylefly/awesome-gpt-image-2",
+        "stars": 20086,
+        "plugins": 1,
+        "previousStars": 8868,
+        "starDelta": 11218,
+        "starDeltaPercent": 126.5,
+        "pluginDelta": 0,
+        "segment": "skill-libraries"
+      },
+      {
+        "path": "pbakaus/impeccable",
+        "url": "https://github.com/pbakaus/impeccable",
+        "stars": 62608,
+        "plugins": 1,
+        "previousStars": 52259,
+        "starDelta": 10349,
+        "starDeltaPercent": 19.8,
+        "pluginDelta": 0,
+        "segment": "design-ui"
+      },
+      {
+        "path": "multica-ai/andrej-karpathy-skills",
+        "url": "https://github.com/multica-ai/andrej-karpathy-skills",
+        "stars": 207396,
+        "plugins": 1,
+        "previousStars": 197349,
+        "starDelta": 10047,
+        "starDeltaPercent": 5.1,
+        "pluginDelta": 0,
+        "segment": "skill-libraries"
+      },
+      {
+        "path": "nextlevelbuilder/ui-ux-pro-max-skill",
+        "url": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill",
+        "stars": 120961,
+        "plugins": 1,
+        "previousStars": 111163,
+        "starDelta": 9798,
+        "starDeltaPercent": 8.8,
+        "pluginDelta": 0,
+        "segment": "design-ui"
+      }
+    ],
+    "topBreakouts": [
+      {
+        "path": "cathrynlavery/diagram-design",
+        "url": "https://github.com/cathrynlavery/diagram-design",
+        "stars": 26986,
+        "plugins": 1,
+        "previousStars": 2897,
+        "starDelta": 24089,
+        "starDeltaPercent": 831.5,
+        "pluginDelta": 0,
+        "segment": "design-ui"
+      },
+      {
+        "path": "anthropics/claude-plugins-community",
+        "url": "https://github.com/anthropics/claude-plugins-community",
+        "stars": 1864,
+        "plugins": 0,
+        "previousStars": 324,
+        "starDelta": 1540,
+        "starDeltaPercent": 475.3,
+        "pluginDelta": 0,
+        "segment": "skill-libraries"
+      },
+      {
+        "path": "humanlayer/skills",
+        "url": "https://github.com/humanlayer/skills",
+        "stars": 499,
+        "plugins": 5,
+        "previousStars": 105,
+        "starDelta": 394,
+        "starDeltaPercent": 375.2,
+        "pluginDelta": 1,
+        "segment": "skill-libraries"
+      },
+      {
+        "path": "coji/natural-japanese",
+        "url": "https://github.com/coji/natural-japanese",
+        "stars": 511,
+        "plugins": 1,
+        "previousStars": 132,
+        "starDelta": 379,
+        "starDeltaPercent": 287.1,
+        "pluginDelta": 0,
+        "segment": "skill-libraries"
+      },
+      {
+        "path": "danielealbano/android-remote-control-mcp",
+        "url": "https://github.com/danielealbano/android-remote-control-mcp",
+        "stars": 573,
+        "plugins": 1,
+        "previousStars": 174,
+        "starDelta": 399,
+        "starDeltaPercent": 229.3,
+        "pluginDelta": 0,
+        "segment": "mcp-integrations"
+      },
+      {
+        "path": "ifixai-ai/iFixAi",
+        "url": "https://github.com/ifixai-ai/iFixAi",
+        "stars": 11176,
+        "plugins": 1,
+        "previousStars": 3456,
+        "starDelta": 7720,
+        "starDeltaPercent": 223.4,
+        "pluginDelta": 0,
+        "segment": "unclassified"
+      },
+      {
+        "path": "coreyhaines31/makerskills",
+        "url": "https://github.com/coreyhaines31/makerskills",
+        "stars": 681,
+        "plugins": 1,
+        "previousStars": 231,
+        "starDelta": 450,
+        "starDeltaPercent": 194.8,
+        "pluginDelta": 0,
+        "segment": "research-learning"
+      },
+      {
+        "path": "devcxl/mattpocock-skills-zh",
+        "url": "https://github.com/devcxl/mattpocock-skills-zh",
+        "stars": 269,
+        "plugins": 1,
+        "previousStars": 111,
+        "starDelta": 158,
+        "starDeltaPercent": 142.3,
+        "pluginDelta": 0,
+        "segment": "skill-libraries"
+      },
+      {
+        "path": "WorldFlowAI/everything-claude-code",
+        "url": "https://github.com/WorldFlowAI/everything-claude-code",
+        "stars": 1723,
+        "plugins": 1,
+        "previousStars": 730,
+        "starDelta": 993,
+        "starDeltaPercent": 136,
+        "pluginDelta": 0,
+        "segment": "dev-tooling"
+      },
+      {
+        "path": "citrolabs/ego-lite",
+        "url": "https://github.com/citrolabs/ego-lite",
+        "stars": 13645,
+        "plugins": 1,
+        "previousStars": 5817,
+        "starDelta": 7828,
+        "starDeltaPercent": 134.6,
+        "pluginDelta": 0,
+        "segment": "browser-automation"
+      }
+    ],
+    "topNewEntrants": [
+      {
+        "path": "storybookjs/storybook",
+        "url": "https://github.com/storybookjs/storybook",
+        "stars": 90940,
+        "plugins": 1
+      },
+      {
+        "path": "ccxt/ccxt",
+        "url": "https://github.com/ccxt/ccxt",
+        "stars": 43756,
+        "plugins": 1
+      },
+      {
+        "path": "huggingface/diffusers",
+        "url": "https://github.com/huggingface/diffusers",
+        "stars": 34385,
+        "plugins": 1
+      },
+      {
+        "path": "garrytan/gbrain",
+        "url": "https://github.com/garrytan/gbrain",
+        "stars": 29142,
+        "plugins": 3
+      },
+      {
+        "path": "clockworklabs/SpacetimeDB",
+        "url": "https://github.com/clockworklabs/SpacetimeDB",
+        "stars": 25075,
+        "plugins": 1
+      },
+      {
+        "path": "google/skills",
+        "url": "https://github.com/google/skills",
+        "stars": 18711,
+        "plugins": 23
+      },
+      {
+        "path": "guillaumemeyer/watermarks-remover",
+        "url": "https://github.com/guillaumemeyer/watermarks-remover",
+        "stars": 18536,
+        "plugins": 1
+      },
+      {
+        "path": "every-app/open-seo",
+        "url": "https://github.com/every-app/open-seo",
+        "stars": 13595,
+        "plugins": 1
+      },
+      {
+        "path": "xberg-io/xberg",
+        "url": "https://github.com/xberg-io/xberg",
+        "stars": 9221,
+        "plugins": 1
+      },
+      {
+        "path": "fastrepl/anarlog",
+        "url": "https://github.com/fastrepl/anarlog",
+        "stars": 9181,
+        "plugins": 1
+      }
+    ],
+    "segments": [
+      {
+        "id": "unclassified",
+        "label": "Unclassified",
+        "repos": 10621,
+        "previousRepos": 8523,
+        "repoDelta": 2098,
+        "starDelta": 125121
+      },
+      {
+        "id": "skill-libraries",
+        "label": "Skill & prompt libraries",
+        "repos": 8967,
+        "previousRepos": 7267,
+        "repoDelta": 1700,
+        "starDelta": 273199
+      },
+      {
+        "id": "mcp-integrations",
+        "label": "MCP servers & integrations",
+        "repos": 2073,
+        "previousRepos": 1519,
+        "repoDelta": 554,
+        "starDelta": 31457
+      },
+      {
+        "id": "dev-tooling",
+        "label": "Developer tooling",
+        "repos": 1584,
+        "previousRepos": 1215,
+        "repoDelta": 369,
+        "starDelta": -12021
+      },
+      {
+        "id": "orchestration",
+        "label": "Orchestration & multi-agent",
+        "repos": 1956,
+        "previousRepos": 1619,
+        "repoDelta": 337,
+        "starDelta": 23191
+      },
+      {
+        "id": "productivity-pm",
+        "label": "Productivity & project management",
+        "repos": 1341,
+        "previousRepos": 1077,
+        "repoDelta": 264,
+        "starDelta": 15373
+      },
+      {
+        "id": "code-quality",
+        "label": "Code review, testing & quality",
+        "repos": 1187,
+        "previousRepos": 927,
+        "repoDelta": 260,
+        "starDelta": 103393
+      },
+      {
+        "id": "docs-writing",
+        "label": "Docs & writing",
+        "repos": 895,
+        "previousRepos": 664,
+        "repoDelta": 231,
+        "starDelta": 32872
+      },
+      {
+        "id": "devops-cloud",
+        "label": "DevOps, cloud & infrastructure",
+        "repos": 945,
+        "previousRepos": 716,
+        "repoDelta": 229,
+        "starDelta": 13102
+      },
+      {
+        "id": "media-creative",
+        "label": "Media & creative generation",
+        "repos": 800,
+        "previousRepos": 593,
+        "repoDelta": 207,
+        "starDelta": 64115
+      },
+      {
+        "id": "research-learning",
+        "label": "Research & learning",
+        "repos": 888,
+        "previousRepos": 701,
+        "repoDelta": 187,
+        "starDelta": 17721
+      },
+      {
+        "id": "agent-frameworks",
+        "label": "Agent frameworks & harnesses",
+        "repos": 723,
+        "previousRepos": 551,
+        "repoDelta": 172,
+        "starDelta": 18987
+      },
+      {
+        "id": "memory-context",
+        "label": "Memory & context engineering",
+        "repos": 804,
+        "previousRepos": 645,
+        "repoDelta": 159,
+        "starDelta": 27516
+      },
+      {
+        "id": "data-analytics",
+        "label": "Data & analytics",
+        "repos": 583,
+        "previousRepos": 440,
+        "repoDelta": 143,
+        "starDelta": 18681
+      },
+      {
+        "id": "security",
+        "label": "Security & compliance",
+        "repos": 513,
+        "previousRepos": 410,
+        "repoDelta": 103,
+        "starDelta": 22786
+      },
+      {
+        "id": "design-ui",
+        "label": "Design & UI",
+        "repos": 438,
+        "previousRepos": 338,
+        "repoDelta": 100,
+        "starDelta": 65349
+      },
+      {
+        "id": "browser-automation",
+        "label": "Browser & automation",
+        "repos": 378,
+        "previousRepos": 286,
+        "repoDelta": 92,
+        "starDelta": 18122
+      },
+      {
+        "id": "seo-marketing",
+        "label": "SEO, marketing & growth",
+        "repos": 368,
+        "previousRepos": 276,
+        "repoDelta": 92,
+        "starDelta": 29333
+      },
+      {
+        "id": "finance-trading",
+        "label": "Finance & trading",
+        "repos": 298,
+        "previousRepos": 246,
+        "repoDelta": 52,
+        "starDelta": 45139
+      },
+      {
+        "id": "presentations",
+        "label": "Slides & presentations",
+        "repos": 190,
+        "previousRepos": 152,
+        "repoDelta": 38,
+        "starDelta": 22846
+      }
+    ]
+  }
+}
