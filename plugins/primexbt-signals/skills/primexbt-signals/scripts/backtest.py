@@ -99,6 +99,35 @@ def backtest(
     }
 
 
+def resample(bars: list[dict], tf: str) -> list[dict]:
+    """Aggregate bars into a higher timeframe: 2h, 4h, 8h, 1d, 1w or 1mo."""
+    from datetime import datetime
+
+    def key(t: str):
+        d = datetime.fromisoformat(t[:19])
+        if tf.endswith("h"):
+            return (d.date(), d.hour // int(tf[:-1]))
+        if tf == "1d":
+            return d.date()
+        if tf == "1w":
+            return d.isocalendar()[:2]
+        if tf == "1mo":
+            return (d.year, d.month)
+        raise ValueError(f"unknown timeframe {tf}")
+
+    out: list[dict] = []
+    last = None
+    for b in sorted(bars, key=lambda b: b["t"]):
+        k = key(b["t"])
+        if k != last:
+            out.append(dict(b))
+            last = k
+        else:
+            cur = out[-1]
+            cur["h"], cur["l"], cur["c"] = max(cur["h"], b["h"]), min(cur["l"], b["l"]), b["c"]
+    return out
+
+
 def _close(pos: dict, px: float, t: str, reason: str, cost_pct: float) -> dict:
     gross = pos["side"] * (px - pos["entry"])
     cost = pos["entry"] * cost_pct / 100
@@ -156,12 +185,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--cost-pct", type=float, default=0.1, help="round-trip cost as %% of price")
     p.add_argument("--exit-on-flip", action="store_true", help="also exit when the bias changes")
     p.add_argument("--long-only", action="store_true", help="ignore SHORT signals")
+    p.add_argument("--resample", help="aggregate input to 2h, 4h, 8h, 1d, 1w or 1mo first")
     p.add_argument("--json", action="store_true")
     args = p.parse_args(argv)
 
     out = {}
     for f in args.files:
         for sym, bars in signals.load(f).items():
+            if args.resample:
+                bars, sym = resample(bars, args.resample), f"{sym}@{args.resample}"
             out[sym] = backtest(bars, args.window, args.target, args.cost_pct, args.exit_on_flip, args.long_only)
 
     if args.json:

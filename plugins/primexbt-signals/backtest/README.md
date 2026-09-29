@@ -66,6 +66,49 @@ sign between halves, which is what noise around zero looks like.
    rose strongly. Buy and hold beat the rules on GOOG (+317%) and BTC, though
    the rules risked only 1% per trade.
 
+## Every timeframe
+
+The same rules and the same 50-bar lookback on every timeframe the data allows.
+Higher timeframes are built by grouping the real bars (`--resample`), so
+2h to 1d EUR/USD comes from the hourly file and weekly and monthly GOOG from
+the daily file.
+
+```bash
+python3 skills/primexbt-signals/scripts/backtest.py backtest/data/EURUSD_H1.csv --cost-pct 0.01 --resample 4h
+```
+
+| Market | Timeframe | Bars | Trades | Base expectancy | Base PF | Long-only expectancy | Long-only PF | Short R total |
+|---|---|---|---|---|---|---|---|---|
+| EUR/USD | 1h | 5,000 | 358 | +0.03R | 1.04 | **+0.22R** | 1.36 | −35.6 |
+| EUR/USD | 2h | 2,528 | 189 | +0.09R | 1.13 | **+0.24R** | 1.40 | −12.9 |
+| EUR/USD | 4h | 1,292 | 96 | +0.01R | 1.01 | **+0.23R** | 1.39 | −15.9 |
+| EUR/USD | 8h | 667 | 58 | −0.14R | 0.80 | +0.12R | 1.19 | −12.3 |
+| EUR/USD | 1d | 251 | 16 | +0.32R | 1.57 | +0.76R | 2.89 | −3.0 |
+| GOOG | 1d | 2,148 | 169 | +0.21R | 1.34 | **+0.45R** | 1.87 | −10.3 |
+| GOOG | 1w | 446 | 38 | +0.11R | 1.18 | +0.24R | 1.41 | −3.1 |
+| GOOG | 1mo | 104 | 5 | −0.43R | 0.46 | +0.65R | 2.95 | −1.0 |
+| BTC/USD | 1mo | 156 | 24 | +0.78R | 3.03 | +0.86R | 3.41 | −1.0 |
+
+Bold marks results with at least 60 trades and positive expectancy in both halves of the sample.
+
+**Across timeframes:**
+
+1. **Shorts lost money on every timeframe tested, 9 out of 9.**
+2. **Long-only was positive on all 9.** It held up in both halves of the sample
+   on EUR/USD 1h, 2h and 4h and on GOOG daily, which are the only runs with enough
+   trades to trust.
+3. **Base rules (long and short) are break-even on intraday FX** (1h–4h) and
+   negative on 8h. Don't trade them there without dropping shorts.
+4. **The 2R target beat the 1R target on 5 of 9**, including every run with
+   more than 150 trades. On the smaller samples the results were mixed.
+5. **Above 4h the samples get small.** EUR/USD daily has 16 trades and GOOG
+   monthly has 5, so treat those rows as anecdotes.
+6. **Not tested:** 1m, 5m, 15m and 30m (no sub-hour data was reachable), and
+   daily or intraday crypto and gold. Daily EUR/USD bars include short Sunday
+   sessions from the hourly source.
+
+Full numbers: [`timeframes.json`](timeframes.json).
+
 ## Caveats
 
 - Long-only was chosen *after* seeing these results. It needs confirming on

@@ -53,7 +53,8 @@ RSI ≥ 70 / ≤ 30 adds a "don't chase" warning.
 
 `scripts/backtest.py` replays these rules bar by bar (see `backtest/README.md`).
 On EUR/USD H1, GOOG daily and BTC monthly, long signals were profitable, while
-**short signals lost money on every market** and a 1R target underperformed 2R.
+**short signals lost money on every market and on every timeframe tested
+(1h to 1mo)**. Long-only was positive on all of them. A 1R target mostly underperformed 2R.
 When you report a SHORT, say that shorts have tested poorly. Prefer TP2 as the
 main target. Daily crypto and gold are still untested.
 

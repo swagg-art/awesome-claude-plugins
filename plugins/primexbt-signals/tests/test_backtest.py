@@ -47,6 +47,20 @@ class BacktestTests(unittest.TestCase):
             for bars in signals.load(f).values():
                 self.assertIn("n", backtest.backtest(bars))
 
+    def test_resample_hourly_to_4h(self):
+        hourly = [
+            {"t": f"2020-01-01 {h:02d}:00:00", "o": h, "h": h + 1, "l": h - 1, "c": h + 0.5}
+            for h in range(8)
+        ]
+        four = backtest.resample(hourly, "4h")
+        self.assertEqual(len(four), 2)
+        self.assertEqual((four[0]["o"], four[0]["h"], four[0]["l"], four[0]["c"]), (0, 4, -1, 3.5))
+        self.assertEqual(four[1]["t"], "2020-01-01 04:00:00")
+
+    def test_resample_daily_to_month(self):
+        daily = [{"t": f"2020-0{m}-{d:02d}", "o": 1, "h": d, "l": 1, "c": d} for m in (1, 2) for d in range(1, 29)]
+        self.assertEqual([b["c"] for b in backtest.resample(daily, "1mo")], [28, 28])
+
 
 if __name__ == "__main__":
     unittest.main()
