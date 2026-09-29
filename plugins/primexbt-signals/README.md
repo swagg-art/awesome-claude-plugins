@@ -46,6 +46,16 @@ daily candles, 11 Aug – 29 Sep 2026) and its output:
 
 \* Gold via PAXG/USD (gold-backed token) because the Alpha Vantage feed timed out.
 
+## Backtest
+
+```bash
+python3 skills/primexbt-signals/scripts/backtest.py backtest/data/*.csv [--long-only] [--target tp1]
+```
+
+The walk-forward test enters at the next bar's open and assumes the stop is hit first when a bar touches both levels. On real EUR/USD, GOOG and BTC
+history, longs had positive expectancy, shorts lost money everywhere, and EUR/USD
+hourly was break-even. Full write-up: [`backtest/README.md`](backtest/README.md).
+
 ## Tests
 
 ```bash

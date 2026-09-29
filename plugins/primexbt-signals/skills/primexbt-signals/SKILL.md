@@ -49,7 +49,15 @@ Scoring (each rule votes +1 / -1 / 0, range -6..+6):
 Levels use ATR(14): stop 1.5×ATR, TP1 1.5×ATR (1R), TP2 3×ATR (2R).
 RSI ≥ 70 / ≤ 30 adds a "don't chase" warning.
 
-## 4. Report
+## 4. Know the track record
+
+`scripts/backtest.py` replays these rules bar by bar (see `backtest/README.md`).
+On EUR/USD H1, GOOG daily and BTC monthly, long signals were profitable, while
+**short signals lost money on every market** and a 1R target underperformed 2R.
+When you report a SHORT, say that shorts have tested poorly. Prefer TP2 as the
+main target. Daily crypto and gold are still untested.
+
+## 5. Report
 
 Show the table, one line of reasoning per symbol, and the warnings. Then:
 
