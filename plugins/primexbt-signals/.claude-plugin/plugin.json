@@ -1,0 +1,7 @@
+{
+  "name": "primexbt-signals",
+  "version": "0.1.0",
+  "description": "Rule-based technical trading signals (trend, MACD, RSI, breakout, ATR levels) for crypto, gold and FX instruments traded on PrimeXBT.",
+  "author": { "name": "swagg-art" },
+  "keywords": ["trading", "signals", "primexbt", "crypto", "forex", "technical-analysis"]
+}
