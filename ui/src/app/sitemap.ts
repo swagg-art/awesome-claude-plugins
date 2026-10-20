@@ -6,11 +6,17 @@ import { BASE_URL } from '../lib/constants.ts'
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const catalogLastModified = getCatalogLastModified()
+  const canonicalCatalogRepos = getCanonicalCatalogRepos()
   const indexableCatalogRepos = getIndexableCatalogRepos()
-  const totalBrowsePages = Math.ceil(indexableCatalogRepos.length / CATALOG_PAGE_SIZE)
+  /**
+   * `/browse/[page]` paginates every canonical repository, so the sitemap has to span that range.
+   * Counting the narrower indexable subset instead left the tail of the pagination — pages that
+   * render repositories and answer 200 — out of the sitemap entirely.
+   */
+  const totalBrowsePages = Math.ceil(canonicalCatalogRepos.length / CATALOG_PAGE_SIZE)
 
   const indexableRepoSet = new Set(indexableCatalogRepos)
-  const repoUrls: MetadataRoute.Sitemap = getCanonicalCatalogRepos()
+  const repoUrls: MetadataRoute.Sitemap = canonicalCatalogRepos
     .filter((repo) => indexableRepoSet.has(repo))
     .map((repo) => ({
       url: `${BASE_URL}/${getRepoCanonicalPath(repo)}`,
