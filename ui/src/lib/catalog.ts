@@ -66,8 +66,24 @@ function getUniqueCatalogRepos(repos: readonly CatalogRepo[]): readonly CatalogR
 }
 
 export function searchCatalogRepos(query: string, sortOption: SortOption, page = 0, pageSize = CATALOG_PAGE_SIZE): CatalogSearchResult {
+  return searchRepos(getCanonicalCatalogRepos(), query, sortOption, page, pageSize)
+}
+
+/**
+ * Searches, sorts and paginates an arbitrary repository list.
+ *
+ * `searchCatalogRepos` binds this to the checked-in catalog; taking the list as a parameter lets
+ * the behaviour be covered with fixtures instead of whichever repositories the latest dataset
+ * refresh happens to contain.
+ */
+export function searchRepos(
+  searchableCatalogRepos: readonly CatalogRepo[],
+  query: string,
+  sortOption: SortOption,
+  page = 0,
+  pageSize = CATALOG_PAGE_SIZE
+): CatalogSearchResult {
   const normalizedQuery = query.trim().toLocaleLowerCase()
-  const searchableCatalogRepos = getCanonicalCatalogRepos()
   const matchingRepos = normalizedQuery
     ? createFuseIndex(searchableCatalogRepos)
         .search(normalizedQuery)
