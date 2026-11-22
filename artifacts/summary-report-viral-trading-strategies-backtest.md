@@ -37,3 +37,31 @@ Prop firms cap loss at the challenge fee, so a near-zero strategy can still pay 
 - Figures are the creator's own claims, unverified by me.
 - The video promotes the creator's backtesting site (backtestthehype.com), a free Telegram EA channel, and free GitHub bots; treat as marketing-adjacent.
 - Not financial advice.
+
+---
+
+## Follow-up: my own tests (Yahoo 5-min bars, QQQ/SPY/DIA, 2026-08-28 to 2026-11-20, ~60 trading days, 0.05R cost/trade)
+Short window, so these are indicative only. Unstated rule details were my assumptions.
+
+### #1 Patrick Whelan 15-min opening range (script: orb_optimizer.py; detail: orb-backtest-results.md)
+Original rules (before optimization), box = 9:30-9:45 candle, stop on opposite side:
+| Version | QQQ | SPY | DIA |
+|---|---|---|---|
+| A: hold to close | -14.6R, 35% win | -4.1R, 38% | -6.2R, 32% |
+| B: trail 1x box range | -1.9R, 40% | +9.2R, 47% | -2.4R, 30% |
+
+Does not reproduce the video's "profitable on all 3 markets". Optimized trailing variants (picked on first 36 days) made +7.7R QQQ, +4.5R SPY, +8.4R DIA on the unseen 24 days, but 24 trades per market is too few to trust.
+
+### #7 Heikin Ashi + 100 EMA + doji (script: ha_doji_ema.py)
+Rules assumed: 5m HA candles, trade with 100 EMA, doji = body <= 25% of range, enter next open, stop at doji extreme, flat by 15:55.
+| Target | QQQ | SPY | DIA |
+|---|---|---|---|
+| 0.5R | 43% win, -204R | 40%, -235R | 43%, -197R |
+| 1R | 37%, -142R | 35%, -172R | 37%, -143R |
+| 2R | 29%, -78R | 29%, -83R | 31%, -54R |
+
+Lost on every market and target; win rate never near the claimed 75% (consistent with the video's 47.6% real rate).
+
+### Files
+artifacts/: orb_optimizer.py, ha_doji_ema.py, orb-backtest-results.md, strategy-1/4/10 SVG diagrams.
+Not financial advice.
