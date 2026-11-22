@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 400" font-family="Arial, sans-serif">
+<rect width="760" height="400" fill="#fff"/>
+<text x="20" y="30" font-size="18" font-weight="bold">#4 Carl - First 15-min Candle Fake-Break Reversal (schematic)</text>
+<rect x="110" y="150" width="150" height="80" fill="#e8f0fe" stroke="#4a78d4" stroke-dasharray="4"/>
+<text x="115" y="142" font-size="12" fill="#4a78d4">Box the first 15-min candle</text>
+<g stroke="#222" stroke-width="2">
+<line x1="300" y1="105" x2="300" y2="155"/><rect x="293" y="115" width="14" height="30" fill="#2a9d5c"/>
+<line x1="360" y1="110" x2="360" y2="190"/><rect x="353" y="150" width="14" height="35" fill="#d64545"/>
+<line x1="420" y1="170" x2="420" y2="250"/><rect x="413" y="185" width="14" height="50" fill="#d64545"/>
+<line x1="480" y1="200" x2="480" y2="280"/><rect x="473" y="215" width="14" height="55" fill="#d64545"/>
+</g>
+<text x="250" y="95" font-size="12" fill="#d64545">1. Fake break above box</text>
+<text x="370" y="132" font-size="12" fill="#d64545">2. Closes back inside</text>
+<text x="430" y="300" font-size="12" fill="#2a9d5c">3. Trade the reversal (short)</text>
+<text x="20" y="335" font-size="14" font-weight="bold">Rules: box first 15-min candle, wait for the fake break, trade the reversal.</text>
+<text x="20" y="360" font-size="11" fill="#666">Result: best win rate 56%; creator's exit lost more than it made, never blew up; Nasdaq 5-min held up. Exact stop/target not given.</text>
+</svg>

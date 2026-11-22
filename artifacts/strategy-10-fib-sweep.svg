@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 400" font-family="Arial, sans-serif">
+<rect width="760" height="400" fill="#fff"/>
+<text x="20" y="30" font-size="18" font-weight="bold">#10 "Easy 15-min strategy" - 4H bias, sweep, 71% Fib (schematic)</text>
+<polyline points="80,300 180,200 260,250 360,110 440,160 520,240 600,125" fill="none" stroke="#333" stroke-width="2"/>
+<line x1="80" y1="300" x2="420" y2="300" stroke="#d64545" stroke-dasharray="4"/>
+<text x="90" y="318" font-size="12" fill="#d64545">Prior low (15m sweep takes it)</text>
+<line x1="360" y1="110" x2="700" y2="110" stroke="#2a9d5c" stroke-dasharray="2"/>
+<line x1="360" y1="240" x2="700" y2="240" stroke="#4a78d4"/>
+<text x="610" y="232" font-size="12" fill="#4a78d4">71% Fib entry</text>
+<text x="20" y="360" font-size="13">Rules: 1) 4-hour bias  2) 15-min liquidity sweep  3) entry at 71% Fibonacci  4) three take-profit levels.</text>
+<text x="20" y="382" font-size="11" fill="#666">Result: 6/6 tests lost on Gold and GBPCAD; GBPCAD -92%. Fib anchor points drawn illustratively.</text>
+</svg>
